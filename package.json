@@ -1,0 +1,7 @@
+{
+  "name": "linelab-max-js",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LineLab JavaScript runtime targeting Max js object",
+  "type": "commonjs"
+}
