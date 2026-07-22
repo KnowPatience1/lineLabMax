@@ -1,0 +1,1 @@
+ChatGPT, To me, that’s becoming one of the defining ideas of the whole system. It’s also beautifully consistent with the way you’ve described your artistic process: the generator creates the artwork, and everything that follows is exploration rather than alteration. I think that’s a strong conceptual foundation.

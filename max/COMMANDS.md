@@ -1,132 +1,147 @@
 # LineLab Max Commands
 
-Command contract for [linelab.max.js](linelab.max.js).
+Command contract for linelab.max.js.
 
 ## Object Setup
 
 In Max, create:
 
-- `js linalab.max.js` (or full path to this file)
+- js linelab.max.js
+- Optional explicit core path:
+  js linelab.max.js /absolute/path/to/src/index.js
 
 Script settings:
 
-- `inlets = 1`
-- `outlets = 1`
+- inlets = 1
+- outlets = 1
+
+## Outlet Message Protocol
+
+All state changes emit structured messages from outlet 0.
+
+1. state_begin <count>
+2. line <lineIndex> <visibleFlag>
+3. state_end
+4. phase <hide|show|done> (during sequence activity)
+
+Notes:
+
+- visibleFlag is 1 for visible, 0 for hidden.
+- state_begin/state_end wrap a complete snapshot.
 
 ## Commands
 
-## `lines <n>`
+## lines <n>
 
-Initialize the runtime with `n` lines and reset sequence state.
+Initialize runtime with n lines and reset sequence state.
 
-- Example: `lines 20`
-- Effect:
-- Creates a new view with 20 visible entries
-- Sets sequence phase to `hide`
-- Sets hide index to `0`
-- Sets show index to `n - 1`
+- Example: lines 20
+- Effects:
+- Creates a new view with n visible entries
+- phase = hide
+- hideIndex = 0
+- showIndex = n - 1
+- Emits full state snapshot
 
----
+## show <i>
 
-## `show <i>`
+Set line i visible.
 
-Set line `i` visible and dump current state.
+- Example: show 3
+- Emits full state snapshot
 
-- Example: `show 3`
+## hide <i>
 
----
+Set line i hidden.
 
-## `hide <i>`
+- Example: hide 3
+- Emits full state snapshot
 
-Set line `i` hidden and dump current state.
+## toggle <i>
 
-- Example: `hide 3`
+Invert visibility of line i.
 
----
+- Example: toggle 3
+- Emits full state snapshot
 
-## `toggle <i>`
+## showall
 
-Invert visibility of line `i` and dump current state.
+Set all lines visible.
 
-- Example: `toggle 3`
+- Example: showall
+- Emits full state snapshot
 
----
+## hideall
 
-## `showall`
+Set all lines hidden.
 
-Set all lines visible and dump current state.
+- Example: hideall
+- Emits full state snapshot
 
-- Example: `showall`
+## dump
 
----
+Emit current state snapshot and print state to Max console.
 
-## `hideall`
+- Example: dump
 
-Set all lines hidden and dump current state.
-
-- Example: `hideall`
-
----
-
-## `dump`
-
-Print visibility state for all lines.
-
-- Example: `dump`
-- Output shape:
-- `line 0 visible`
-- `line 1 hidden`
-- ...
-
----
-
-## `interval <ms>`
+## interval <ms>
 
 Set sequence step interval in milliseconds.
 
-- Example: `interval 200`
-- Minimum effective value is `1`
+- Example: interval 200
+- Minimum effective value is 1
 
----
-
-## `start`
+## start
 
 Begin auto sequence task using current interval.
 
 Behavior:
 
 1. Stops any existing task
-2. Repeats `stepSequence(...)`
-3. Dumps state after each step
-4. Stops automatically when phase becomes `done`
+2. Repeats stepSequence(phase, hideIndex, showIndex)
+3. Emits state snapshot each step
+4. Emits phase updates
+5. Stops automatically when phase becomes done
 
-- Example: `start`
+- Example: start
 
----
+## stop
 
-## `stop`
+Cancel running sequence task, if any.
 
-Cancel the running sequence task, if any.
-
-- Example: `stop`
+- Example: stop
 
 ## Typical Session
 
-1. `lines 20`
-2. `interval 200`
-3. `start`
-4. `stop` (optional interrupt)
-5. `showall`
-6. `dump`
+1. lines 20
+2. interval 200
+3. start
+4. stop (optional interrupt)
+5. showall
+6. dump
+
+## Minimal Max Routing
+
+Recommended decoder chain:
+
+1. js linelab.max.js
+2. route state_begin line state_end phase
+3. line outlet -> unpack i i
+
+Meaning:
+
+- first int: lineIndex
+- second int: visibleFlag (1 or 0)
 
 ## Troubleshooting
 
-## No output changes
+## No state output
 
-- Confirm `js` object path points to [linelab.max.js](linelab.max.js).
-- Confirm [src/index.js](../src/index.js) exports `LineLabInterface`.
+- Confirm js object points to max/linelab.max.js.
+- Confirm src/index.js exports LineLabInterface.
+- Send lines <n> first to initialize.
 
 ## Script edits not taking effect
 
-- `autowatch = 1` should reload edits.
-- If needed, close/reopen patch or recreate the `js` object.
+- autowatch = 1 should reload edits.
+- If needed, recreate the js object or reopen the patch.
