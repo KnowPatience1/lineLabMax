@@ -1,35 +1,36 @@
-var LineDefinition = require("../model/line_definition").LineDefinition;
+// Updated 2026-07-24 for JavaScript ES6 refactor.
+const { LineDefinition } = require("../model/line_definition");
 
 function shuffleInPlace(values) {
-  for (var i = values.length - 1; i > 0; i -= 1) {
-    var j = Math.floor(Math.random() * (i + 1));
-    var tmp = values[i];
+  for (let i = values.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = values[i];
     values[i] = values[j];
     values[j] = tmp;
   }
 }
 
-function RandomLineGenerator() {}
+class RandomLineGenerator {
+  generate(attributes) {
+    const count = attributes.size();
+    const indices = [];
+    const definitions = [];
 
-RandomLineGenerator.prototype.generate = function (attributes) {
-  var count = attributes.size();
-  var indices = [];
-  var definitions = [];
+    for (let i = 0; i < count; i += 1) {
+      indices.push(i);
+    }
 
-  for (var i = 0; i < count; i += 1) {
-    indices.push(i);
+    shuffleInPlace(indices);
+
+    // Take shuffled point indices two at a time to form start/end pairs.
+    for (let k = 0; k < count - 1; k += 2) {
+      definitions.push(new LineDefinition(indices[k], indices[k + 1]));
+    }
+
+    return definitions;
   }
-
-  shuffleInPlace(indices);
-
-  // Take shuffled point indices two at a time to form start/end pairs.
-  for (var k = 0; k < count - 1; k += 2) {
-    definitions.push(new LineDefinition(indices[k], indices[k + 1]));
-  }
-
-  return definitions;
-};
+}
 
 module.exports = {
-  RandomLineGenerator: RandomLineGenerator
+  RandomLineGenerator
 };

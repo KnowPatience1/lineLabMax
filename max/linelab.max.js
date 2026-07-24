@@ -1,9 +1,10 @@
+// Updated 2026-07-24 for JavaScript ES6 refactor.
 autowatch = 1;
 inlets = 1;
 outlets = 1;
 
 function loadCoreModule() {
-  var candidates = [];
+  const candidates = [];
 
   // Optional override from Max object args:
   // js linelab.max.js /absolute/path/to/src/index.js
@@ -27,10 +28,10 @@ function loadCoreModule() {
   candidates.push("dist/index.js");
   candidates.push("dist/index");
 
-  var errors = [];
+  const errors = [];
 
-  for (var i = 0; i < candidates.length; i += 1) {
-    var p = candidates[i];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const p = candidates[i];
     try {
       return require(p);
     } catch (e) {
@@ -39,7 +40,7 @@ function loadCoreModule() {
   }
 
   post("[linelab] could not load core module\n");
-  for (var j = 0; j < errors.length; j += 1) {
+  for (let j = 0; j < errors.length; j += 1) {
     post("[linelab] " + errors[j] + "\n");
   }
 
@@ -48,15 +49,15 @@ function loadCoreModule() {
   );
 }
 
-var core = loadCoreModule();
-var api = new core.LineLabInterface();
+const core = loadCoreModule();
+const api = new core.LineLabInterface();
 
-var phase = "hide";
-var hideIndex = 0;
-var showIndex = -1;
-var task = null;
-var stepMs = 200;
-var defaultPointCount = 2000;
+let phase = "hide";
+let hideIndex = 0;
+let showIndex = -1;
+let task = null;
+let stepMs = 200;
+const defaultPointCount = 2000;
 
 function log(msg) {
   post("[linelab] " + msg + "\n");
@@ -68,10 +69,10 @@ function dump() {
 }
 
 function emitState() {
-  var entries = api.getEntries();
+  const entries = api.getEntries();
 
   outlet(0, "state_begin", entries.length);
-  for (var i = 0; i < entries.length; i += 1) {
+  for (let i = 0; i < entries.length; i += 1) {
     outlet(
       0,
       "line",
@@ -83,11 +84,11 @@ function emitState() {
 }
 
 function emitRenderLines() {
-  var lines = api.getRenderLines();
+  const lines = api.getRenderLines();
 
   outlet(0, "render_begin", lines.length);
-  for (var i = 0; i < lines.length; i += 1) {
-    var line = lines[i];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
     outlet(
       0,
       "render_line",
@@ -109,7 +110,7 @@ function emitRenderLines() {
 }
 
 function sketchWidth(width) {
-  var w = Number(width);
+  const w = Number(width);
   if (!isFinite(w) || w <= 0) {
     return 2;
   }
@@ -119,12 +120,12 @@ function sketchWidth(width) {
 }
 
 function emitSketchLines() {
-  var lines = api.getRenderLines();
+  const lines = api.getRenderLines();
 
   outlet(0, "sketch", "reset");
 
-  for (var i = 0; i < lines.length; i += 1) {
-    var line = lines[i];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
 
     outlet(
       0,
@@ -194,7 +195,7 @@ function lines(n) {
 }
 
 function parsePointCount(value) {
-  var n = parseInt(value, 10);
+  const n = parseInt(value, 10);
   if (!isFinite(n) || n < 2) {
     return defaultPointCount;
   }
@@ -202,7 +203,7 @@ function parsePointCount(value) {
 }
 
 function ensureGenerated(pointCount) {
-  var count = parsePointCount(pointCount);
+  const count = parsePointCount(pointCount);
 
   api.generateRandom(count);
 
@@ -277,7 +278,7 @@ function start() {
   stop();
 
   task = new Task(function () {
-    var next = api.stepSequence(phase, hideIndex, showIndex);
+    const next = api.stepSequence(phase, hideIndex, showIndex);
     phase = next.phase;
     hideIndex = next.hideIndex;
     showIndex = next.showIndex;

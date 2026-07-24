@@ -1,5 +1,6 @@
+// Updated 2026-07-24 for JavaScript ES6 refactor.
 function tryRequireAny(candidates) {
-  for (var i = 0; i < candidates.length; i += 1) {
+  for (let i = 0; i < candidates.length; i += 1) {
     try {
       return require(candidates[i]);
     } catch (_e) {
@@ -10,50 +11,52 @@ function tryRequireAny(candidates) {
   return null;
 }
 
-function FallbackView(lineCount) {
-  var count = Math.max(0, Math.floor(Number(lineCount) || 0));
-  this.entries = [];
-  for (var i = 0; i < count; i += 1) {
-    this.entries.push({ lineIndex: i, visible: true });
+class FallbackView {
+  constructor(lineCount) {
+    const count = Math.max(0, Math.floor(Number(lineCount) || 0));
+    this.entries = [];
+    for (let i = 0; i < count; i += 1) {
+      this.entries.push({ lineIndex: i, visible: true });
+    }
+  }
+
+  length() {
+    return this.entries.length;
+  }
+
+  getEntries() {
+    return this.entries;
+  }
+
+  show(lineIndex) {
+    this.entries[lineIndex].visible = true;
+  }
+
+  hide(lineIndex) {
+    this.entries[lineIndex].visible = false;
+  }
+
+  toggle(lineIndex) {
+    const entry = this.entries[lineIndex];
+    entry.visible = !entry.visible;
+  }
+
+  showAll() {
+    for (let i = 0; i < this.entries.length; i += 1) {
+      this.entries[i].visible = true;
+    }
+  }
+
+  hideAll() {
+    for (let i = 0; i < this.entries.length; i += 1) {
+      this.entries[i].visible = false;
+    }
   }
 }
 
-FallbackView.prototype.length = function () {
-  return this.entries.length;
-};
-
-FallbackView.prototype.getEntries = function () {
-  return this.entries;
-};
-
-FallbackView.prototype.show = function (lineIndex) {
-  this.entries[lineIndex].visible = true;
-};
-
-FallbackView.prototype.hide = function (lineIndex) {
-  this.entries[lineIndex].visible = false;
-};
-
-FallbackView.prototype.toggle = function (lineIndex) {
-  var entry = this.entries[lineIndex];
-  entry.visible = !entry.visible;
-};
-
-FallbackView.prototype.showAll = function () {
-  for (var i = 0; i < this.entries.length; i += 1) {
-    this.entries[i].visible = true;
-  }
-};
-
-FallbackView.prototype.hideAll = function () {
-  for (var i = 0; i < this.entries.length; i += 1) {
-    this.entries[i].visible = false;
-  }
-};
-
 function fallbackCreateRandomAttributes(pointCount) {
-  var count = Math.max(0, Math.floor(Number(pointCount) || 0));
-  var attrs = {
+  const count = Math.max(0, Math.floor(Number(pointCount) || 0));
+  const attrs = {
     x: [], y: [], z: [], r: [], g: [], b: [], a: [], width: []
   };
 
@@ -61,7 +64,7 @@ function fallbackCreateRandomAttributes(pointCount) {
     return min + Math.random() * (max - min);
   }
 
-  for (var i = 0; i < count; i += 1) {
+  for (let i = 0; i < count; i += 1) {
     attrs.x.push(randomBetween(-1.0, 1.0));
     attrs.y.push(randomBetween(-1.0, 1.0));
     attrs.z.push(randomBetween(-1.0, 1.0));
@@ -80,44 +83,42 @@ function fallbackCreateRandomAttributes(pointCount) {
   return attrs;
 }
 
-function FallbackRandomLineGenerator() {}
+class FallbackRandomLineGenerator {
+  generate(attributes) {
+    const count = attributes.size();
+    const indices = [];
+    const definitions = [];
 
-FallbackRandomLineGenerator.prototype.generate = function (attributes) {
-  var count = attributes.size();
-  var indices = [];
-  var definitions = [];
-  var i;
+    for (let i = 0; i < count; i += 1) {
+      indices.push(i);
+    }
 
-  for (i = 0; i < count; i += 1) {
-    indices.push(i);
+    for (let i = indices.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const temp = indices[i];
+      indices[i] = indices[j];
+      indices[j] = temp;
+    }
+
+    for (let i = 0; i < count - 1; i += 2) {
+      definitions.push({ start: indices[i], end: indices[i + 1] });
+    }
+
+    return definitions;
   }
-
-  for (i = indices.length - 1; i > 0; i -= 1) {
-    var j = Math.floor(Math.random() * (i + 1));
-    var temp = indices[i];
-    indices[i] = indices[j];
-    indices[j] = temp;
-  }
-
-  for (i = 0; i < count - 1; i += 2) {
-    definitions.push({ start: indices[i], end: indices[i + 1] });
-  }
-
-  return definitions;
-};
+}
 
 function fallbackBuildLinePayloads(attributes, definitions, view) {
-  var payloads = [];
-  var i;
+  const payloads = [];
 
   if (view && Array.isArray(view.entries)) {
-    for (i = 0; i < view.entries.length; i += 1) {
-      var entry = view.entries[i];
+    for (let i = 0; i < view.entries.length; i += 1) {
+      const entry = view.entries[i];
       if (!entry.visible) {
         continue;
       }
 
-      var def = definitions[entry.lineIndex];
+      const def = definitions[entry.lineIndex];
       if (!def) {
         continue;
       }
@@ -137,8 +138,8 @@ function fallbackBuildLinePayloads(attributes, definitions, view) {
     return payloads;
   }
 
-  for (i = 0; i < definitions.length; i += 1) {
-    var def2 = definitions[i];
+  for (let i = 0; i < definitions.length; i += 1) {
+    const def2 = definitions[i];
     payloads.push({
       id: i,
       startIndex: def2.start,
@@ -154,12 +155,12 @@ function fallbackBuildLinePayloads(attributes, definitions, view) {
   return payloads;
 }
 
-var isMaxRuntime = typeof post === "function";
+const isMaxRuntime = typeof post === "function";
 
-var viewModule = null;
-var randomAttributesModule = null;
-var randomLineGeneratorModule = null;
-var geometryBuilderModule = null;
+let viewModule = null;
+let randomAttributesModule = null;
+let randomLineGeneratorModule = null;
+let geometryBuilderModule = null;
 
 if (!isMaxRuntime) {
   viewModule = tryRequireAny([
@@ -207,172 +208,174 @@ if (!isMaxRuntime) {
   ]);
 }
 
-var View = viewModule && viewModule.View ? viewModule.View : FallbackView;
-var createRandomAttributes = randomAttributesModule && randomAttributesModule.createRandomAttributes
+const View = viewModule && viewModule.View ? viewModule.View : FallbackView;
+const createRandomAttributes = randomAttributesModule && randomAttributesModule.createRandomAttributes
   ? randomAttributesModule.createRandomAttributes
   : fallbackCreateRandomAttributes;
-var RandomLineGenerator = randomLineGeneratorModule && randomLineGeneratorModule.RandomLineGenerator
+const RandomLineGenerator = randomLineGeneratorModule && randomLineGeneratorModule.RandomLineGenerator
   ? randomLineGeneratorModule.RandomLineGenerator
   : FallbackRandomLineGenerator;
-var buildLinePayloads = geometryBuilderModule && geometryBuilderModule.buildLinePayloads
+const buildLinePayloads = geometryBuilderModule && geometryBuilderModule.buildLinePayloads
   ? geometryBuilderModule.buildLinePayloads
   : fallbackBuildLinePayloads;
 
-function LineLabInterface() {
-  this.view = new View(0);
-  this.lineCount = 0;
-  this.attributes = null;
-  this.definitions = [];
-  this.renderLines = [];
-}
-
-LineLabInterface.prototype.log = function (message) {
-  if (typeof post === "function") {
-    post("[linelab] " + message + "\n");
-    return;
-  }
-  console.log("[linelab] " + message);
-};
-
-LineLabInterface.prototype.init = function (lineCount) {
-  if (!isFinite(lineCount) || lineCount < 0) {
-    this.log("init: invalid line count");
-    return;
+class LineLabInterface {
+  constructor() {
+    this.view = new View(0);
+    this.lineCount = 0;
+    this.attributes = null;
+    this.definitions = [];
+    this.renderLines = [];
   }
 
-  this.lineCount = Math.floor(lineCount);
-  this.view = new View(this.lineCount);
-  this.attributes = null;
-  this.definitions = [];
-  this.renderLines = [];
-  this.log("initialized with " + this.lineCount + " lines");
-};
-
-LineLabInterface.prototype.generateRandom = function (pointCount) {
-  var count = Math.floor(Number(pointCount));
-
-  if (!isFinite(count) || count < 2) {
-    this.log("generateRandom: point count must be >= 2");
-    return;
+  log(message) {
+    if (typeof post === "function") {
+      post("[linelab] " + message + "\n");
+      return;
+    }
+    console.log("[linelab] " + message);
   }
 
-  this.attributes = createRandomAttributes(count);
-  this.definitions = new RandomLineGenerator().generate(this.attributes);
-  this.lineCount = this.definitions.length;
-  this.view = new View(this.lineCount);
-  this.renderLines = [];
+  init(lineCount) {
+    if (!isFinite(lineCount) || lineCount < 0) {
+      this.log("init: invalid line count");
+      return;
+    }
 
-  this.log(
-    "generated " + count + " points and " + this.lineCount + " line definitions"
-  );
-};
-
-LineLabInterface.prototype.getDefinitionCount = function () {
-  return this.definitions.length;
-};
-
-LineLabInterface.prototype.hasGeneratedData = function () {
-  return !!this.attributes && this.definitions.length > 0;
-};
-
-LineLabInterface.prototype.buildRenderLines = function () {
-  if (!this.hasGeneratedData()) {
-    this.log("buildRenderLines: no generated data; call generateRandom first");
-    return [];
+    this.lineCount = Math.floor(lineCount);
+    this.view = new View(this.lineCount);
+    this.attributes = null;
+    this.definitions = [];
+    this.renderLines = [];
+    this.log("initialized with " + this.lineCount + " lines");
   }
 
-  this.renderLines = buildLinePayloads(this.attributes, this.definitions, this.view);
-  this.log("built " + this.renderLines.length + " render lines");
-  return this.renderLines;
-};
+  generateRandom(pointCount) {
+    const count = Math.floor(Number(pointCount));
 
-LineLabInterface.prototype.getRenderLines = function () {
-  return this.renderLines;
-};
+    if (!isFinite(count) || count < 2) {
+      this.log("generateRandom: point count must be >= 2");
+      return;
+    }
 
-LineLabInterface.prototype.show = function (i) {
-  if (i < 0 || i >= this.lineCount) return;
-  this.view.show(Math.floor(i));
-};
+    this.attributes = createRandomAttributes(count);
+    this.definitions = new RandomLineGenerator().generate(this.attributes);
+    this.lineCount = this.definitions.length;
+    this.view = new View(this.lineCount);
+    this.renderLines = [];
 
-LineLabInterface.prototype.hide = function (i) {
-  if (i < 0 || i >= this.lineCount) return;
-  this.view.hide(Math.floor(i));
-};
-
-LineLabInterface.prototype.toggle = function (i) {
-  if (i < 0 || i >= this.lineCount) return;
-  this.view.toggle(Math.floor(i));
-};
-
-LineLabInterface.prototype.showAll = function () {
-  this.view.showAll();
-};
-
-LineLabInterface.prototype.hideAll = function () {
-  this.view.hideAll();
-};
-
-LineLabInterface.prototype.getEntries = function () {
-  return this.view.getEntries();
-};
-
-LineLabInterface.prototype.getLineCount = function () {
-  return this.lineCount;
-};
-
-LineLabInterface.prototype.dump = function () {
-  var entries = this.view.getEntries();
-  for (var i = 0; i < entries.length; i += 1) {
-    var state = entries[i].visible ? "visible" : "hidden";
-    this.log("line " + entries[i].lineIndex + " " + state);
+    this.log(
+      "generated " + count + " points and " + this.lineCount + " line definitions"
+    );
   }
-};
 
-LineLabInterface.prototype.stepSequence = function (phase, hideIndex, showIndex) {
-  if (phase === "hide") {
-    if (hideIndex >= this.lineCount) {
-      this.log("Hide sequence complete. Starting show sequence.");
+  getDefinitionCount() {
+    return this.definitions.length;
+  }
+
+  hasGeneratedData() {
+    return !!this.attributes && this.definitions.length > 0;
+  }
+
+  buildRenderLines() {
+    if (!this.hasGeneratedData()) {
+      this.log("buildRenderLines: no generated data; call generateRandom first");
+      return [];
+    }
+
+    this.renderLines = buildLinePayloads(this.attributes, this.definitions, this.view);
+    this.log("built " + this.renderLines.length + " render lines");
+    return this.renderLines;
+  }
+
+  getRenderLines() {
+    return this.renderLines;
+  }
+
+  show(i) {
+    if (i < 0 || i >= this.lineCount) return;
+    this.view.show(Math.floor(i));
+  }
+
+  hide(i) {
+    if (i < 0 || i >= this.lineCount) return;
+    this.view.hide(Math.floor(i));
+  }
+
+  toggle(i) {
+    if (i < 0 || i >= this.lineCount) return;
+    this.view.toggle(Math.floor(i));
+  }
+
+  showAll() {
+    this.view.showAll();
+  }
+
+  hideAll() {
+    this.view.hideAll();
+  }
+
+  getEntries() {
+    return this.view.getEntries();
+  }
+
+  getLineCount() {
+    return this.lineCount;
+  }
+
+  dump() {
+    const entries = this.view.getEntries();
+    for (let i = 0; i < entries.length; i += 1) {
+      const state = entries[i].visible ? "visible" : "hidden";
+      this.log("line " + entries[i].lineIndex + " " + state);
+    }
+  }
+
+  stepSequence(phase, hideIndex, showIndex) {
+    if (phase === "hide") {
+      if (hideIndex >= this.lineCount) {
+        this.log("Hide sequence complete. Starting show sequence.");
+        return {
+          phase: "show",
+          hideIndex,
+          showIndex: this.lineCount - 1
+        };
+      }
+
+      this.hide(hideIndex);
+      return {
+        phase: "hide",
+        hideIndex: hideIndex + 1,
+        showIndex
+      };
+    }
+
+    if (phase === "show") {
+      if (showIndex < 0) {
+        this.log("Show sequence complete.");
+        return {
+          phase: "done",
+          hideIndex,
+          showIndex
+        };
+      }
+
+      this.show(showIndex);
       return {
         phase: "show",
-        hideIndex: hideIndex,
-        showIndex: this.lineCount - 1
+        hideIndex,
+        showIndex: showIndex - 1
       };
     }
 
-    this.hide(hideIndex);
     return {
-      phase: "hide",
-      hideIndex: hideIndex + 1,
-      showIndex: showIndex
+      phase: "done",
+      hideIndex,
+      showIndex
     };
   }
-
-  if (phase === "show") {
-    if (showIndex < 0) {
-      this.log("Show sequence complete.");
-      return {
-        phase: "done",
-        hideIndex: hideIndex,
-        showIndex: showIndex
-      };
-    }
-
-    this.show(showIndex);
-    return {
-      phase: "show",
-      hideIndex: hideIndex,
-      showIndex: showIndex - 1
-    };
-  }
-
-  return {
-    phase: "done",
-    hideIndex: hideIndex,
-    showIndex: showIndex
-  };
-};
+}
 
 module.exports = {
-  LineLabInterface: LineLabInterface
+  LineLabInterface
 };

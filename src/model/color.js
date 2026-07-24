@@ -1,3 +1,4 @@
+// Updated 2026-07-24 for JavaScript ES6 refactor.
 function isFiniteNumber(value) {
   return typeof value === "number" && isFinite(value);
 }
@@ -12,30 +13,32 @@ function validateChannel(name, value) {
   }
 }
 
-function Color(r, g, b, a) {
-  this.r = r;
-  this.g = g;
-  this.b = b;
-  this.a = a;
+class Color {
+  constructor(r, g, b, a) {
+    this.r = r;
+    this.g = g;
+    this.b = b;
+    this.a = a;
 
-  this.validate();
+    this.validate();
+  }
+
+  validate() {
+    validateChannel("r", this.r);
+    validateChannel("g", this.g);
+    validateChannel("b", this.b);
+    validateChannel("a", this.a);
+  }
+
+  toArray() {
+    return [this.r, this.g, this.b, this.a];
+  }
+
+  copy() {
+    return new Color(this.r, this.g, this.b, this.a);
+  }
 }
 
-Color.prototype.validate = function () {
-  validateChannel("r", this.r);
-  validateChannel("g", this.g);
-  validateChannel("b", this.b);
-  validateChannel("a", this.a);
-};
-
-Color.prototype.toArray = function () {
-  return [this.r, this.g, this.b, this.a];
-};
-
-Color.prototype.copy = function () {
-  return new Color(this.r, this.g, this.b, this.a);
-};
-
 module.exports = {
-  Color: Color
+  Color
 };

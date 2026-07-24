@@ -1,3 +1,4 @@
+// Updated 2026-07-24 for JavaScript ES6 refactor.
 function isFiniteNumber(value) {
   return typeof value === "number" && isFinite(value);
 }
@@ -8,28 +9,30 @@ function validateAxis(name, value) {
   }
 }
 
-function Vec3(x, y, z) {
-  this.x = x;
-  this.y = y;
-  this.z = z;
+class Vec3 {
+  constructor(x, y, z) {
+    this.x = x;
+    this.y = y;
+    this.z = z;
 
-  this.validate();
+    this.validate();
+  }
+
+  validate() {
+    validateAxis("x", this.x);
+    validateAxis("y", this.y);
+    validateAxis("z", this.z);
+  }
+
+  toArray() {
+    return [this.x, this.y, this.z];
+  }
+
+  copy() {
+    return new Vec3(this.x, this.y, this.z);
+  }
 }
 
-Vec3.prototype.validate = function () {
-  validateAxis("x", this.x);
-  validateAxis("y", this.y);
-  validateAxis("z", this.z);
-};
-
-Vec3.prototype.toArray = function () {
-  return [this.x, this.y, this.z];
-};
-
-Vec3.prototype.copy = function () {
-  return new Vec3(this.x, this.y, this.z);
-};
-
 module.exports = {
-  Vec3: Vec3
+  Vec3
 };
