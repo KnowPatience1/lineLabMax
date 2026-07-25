@@ -1,4 +1,62 @@
 // Updated 2026-07-25 for JavaScript ES6 line/group/layer system module.
+/* Here are the intended public commands in lineBaseSystem.js that you can call from Max:
+
+1. generate numLines  
+Syntax: generate 120  
+Purpose: Generates and freezes the random pool, builds lines, builds hierarchy, and renders.
+
+2. reshuffle  
+Syntax: reshuffle  
+Purpose: Keeps the same frozen pool, reshuffles point pairing/order, rebuilds hierarchy, and rerenders.
+
+3. setForm formName  
+Syntax: setForm cube  
+Syntax: setForm sphere  
+Purpose: Remaps geometry form and rerenders.
+
+4. buildHierarchy  
+Syntax: buildHierarchy  
+Purpose: Rebuilds layer/group structure from current lines and rerenders.
+
+5. reportHierarchy  
+Syntax: reportHierarchy  
+Purpose: Emits hierarchy data to outlet messages:
+hierarchy_begin, layer, group, group_line, hierarchy_end.
+
+6. setHierarchyRanges layerMin layerMax groupsMin groupsMax linesMin linesMax  
+Syntax: setHierarchyRanges 1 4 1 6 1 12  
+Purpose: Sets random bounds for hierarchy generation. Rebuilds hierarchy if data already exists.
+
+7. resetHierarchyRanges  
+Syntax: resetHierarchyRanges  
+Purpose: Restores default hierarchy bounds and rebuilds hierarchy if data exists.
+
+8. setVisible targetType targetId visibleFlag  
+Syntax: setVisible layer a1 0  
+Syntax: setVisible group g3 1  
+Syntax: setVisible line 12 0  
+Purpose: Sets visibility at layer, group, or line level, then rerenders.  
+Note: Use visibleFlag as 0 or 1.
+
+9. show targetType targetId  
+Syntax: show layer a2  
+Syntax: show group g1  
+Syntax: show line 7  
+Purpose: Convenience wrapper for setVisible ... 1.
+
+10. hide targetType targetId  
+Syntax: hide layer a2  
+Syntax: hide group g1  
+Syntax: hide line 7  
+Purpose: Convenience wrapper for setVisible ... 0.
+
+Important usage notes:
+1. targetType must be layer, group, or line.
+2. Layer ids are a1, a2, a3...
+3. Group ids are g1, g2, g3...
+4. For line visibility commands, pass a numeric line id.
+*/
+
 "use strict";
 autowatch = 1;
 inlets = 1;
@@ -16,6 +74,9 @@ let lineDefinitions = [];
 let lines = [];
 let selectedFormName = "cube";
 let hierarchy = null;
+let selectedLayerId = null;
+let selectedGroupId = null;
+let selectedLineId = null;
 
 const hierarchyRangeConfig = {
   layerCount: {
@@ -445,9 +506,188 @@ function flattenLineOrderFromLayers(layers, groupsById) {
   return orderedLineIds;
 }
 
+function getNamedObject(objectName) {
+  if (typeof patcher === "object" && patcher && typeof patcher.getnamed === "function") {
+    return patcher.getnamed(objectName);
+  }
+
+  if (typeof globalThis === "object" && globalThis && globalThis.patcher && typeof globalThis.patcher.getnamed === "function") {
+    return globalThis.patcher.getnamed(objectName);
+  }
+
+  return null;
+}
+
+function sendNamedObjectMessage(objectName, messageName, value) {
+  const namedObject = getNamedObject(objectName);
+
+  if (namedObject && typeof namedObject.message === "function") {
+    if (typeof value === "undefined") {
+      namedObject.message(messageName);
+    } else {
+      namedObject.message(messageName, value);
+    }
+    return true;
+  }
+
+  if (typeof messnamed === "function") {
+    if (typeof value === "undefined") {
+      messnamed(objectName, messageName);
+    } else {
+      messnamed(objectName, messageName, value);
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function clearNamedMenu(objectName) {
+  return sendNamedObjectMessage(objectName, "clear");
+}
+
+function appendNamedMenuItem(objectName, itemValue) {
+  return sendNamedObjectMessage(objectName, "append", itemValue);
+}
+
+function resolveMenuSelection(selectionValue, values) {
+  if (!values || values.length === 0) {
+    return null;
+  }
+
+  if (typeof selectionValue === "undefined" || selectionValue === null || selectionValue === "") {
+    return values[0];
+  }
+
+  const numericValue = Number(selectionValue);
+  const isNumericSelection = isFinite(numericValue);
+
+  if (isNumericSelection) {
+    const oneBasedIndex = Math.floor(numericValue) - 1;
+    if (oneBasedIndex >= 0 && oneBasedIndex < values.length) {
+      return values[oneBasedIndex];
+    }
+
+    const zeroBasedIndex = Math.floor(numericValue);
+    if (zeroBasedIndex >= 0 && zeroBasedIndex < values.length) {
+      return values[zeroBasedIndex];
+    }
+  }
+
+  const selectionText = String(selectionValue);
+  for (let i = 0; i < values.length; i += 1) {
+    if (String(values[i]) === selectionText) {
+      return values[i];
+    }
+  }
+
+  return values[0];
+}
+
+function getGroupsForLayer(layerId) {
+  const groups = [];
+
+  if (!hierarchy || !hierarchy.groups) {
+    return groups;
+  }
+
+  for (let i = 0; i < hierarchy.groups.length; i += 1) {
+    const group = hierarchy.groups[i];
+    if (group.layer_id === layerId) {
+      groups.push(group);
+    }
+  }
+
+  return groups;
+}
+
+function emitLineMenu() {
+  const couldClearMenu = clearNamedMenu("lMen");
+
+  if (!couldClearMenu) {
+    log("emitLineMenu: could not reach lMen");
+    return;
+  }
+
+  if (!hierarchy || !selectedGroupId) {
+    selectedLineId = null;
+    return;
+  }
+
+  const group = getHierarchyGroupById(selectedGroupId);
+  if (!group || !group.line_ids || group.line_ids.length === 0) {
+    selectedLineId = null;
+    return;
+  }
+
+  for (let i = 0; i < group.line_ids.length; i += 1) {
+    appendNamedMenuItem("lMen", group.line_ids[i]);
+  }
+
+  selectedLineId = group.line_ids[0];
+}
+
+function emitGroupMenu() {
+  const couldClearMenu = clearNamedMenu("gMen");
+
+  if (!couldClearMenu) {
+    log("emitGroupMenu: could not reach gMen");
+    return;
+  }
+
+  if (!hierarchy || !hierarchy.groups || !selectedLayerId) {
+    selectedGroupId = null;
+    emitLineMenu();
+    return;
+  }
+
+  const groupsInLayer = getGroupsForLayer(selectedLayerId);
+  for (let i = 0; i < groupsInLayer.length; i += 1) {
+    appendNamedMenuItem("gMen", groupsInLayer[i].group_id);
+  }
+
+  if (groupsInLayer.length > 0) {
+    selectedGroupId = groupsInLayer[0].group_id;
+  } else {
+    selectedGroupId = null;
+  }
+
+  emitLineMenu();
+}
+
+function emitLayerMenu() {
+  const couldClearMenu = clearNamedMenu("aMen");
+
+  if (!couldClearMenu) {
+    log("emitLayerMenu: could not reach aMen");
+    return;
+  }
+
+  if (!hierarchy || !hierarchy.layers) {
+    selectedLayerId = null;
+    selectedGroupId = null;
+    selectedLineId = null;
+    emitGroupMenu();
+    return;
+  }
+
+  for (let i = 0; i < hierarchy.layers.length; i += 1) {
+    appendNamedMenuItem("aMen", hierarchy.layers[i].layer_id);
+  }
+
+  if (hierarchy.layers.length > 0) {
+    selectedLayerId = hierarchy.layers[0].layer_id;
+  } else {
+    selectedLayerId = null;
+  }
+
+  emitGroupMenu();
+}
+
 function buildHierarchyFromCurrentLines() {
   if (!lines || lines.length === 0) {
     hierarchy = null;
+    emitLayerMenu();
     return;
   }
 
@@ -504,6 +744,54 @@ function buildHierarchyFromCurrentLines() {
     },
     ordered_line_ids: orderedLineIds
   };
+
+  emitLayerMenu();
+}
+
+function selectLayer(selectionValue) {
+  if (!hierarchy || !hierarchy.layers || hierarchy.layers.length === 0) {
+    log("selectLayer requires generated data");
+    return;
+  }
+
+  const layerIds = [];
+  for (let i = 0; i < hierarchy.layers.length; i += 1) {
+    layerIds.push(hierarchy.layers[i].layer_id);
+  }
+
+  selectedLayerId = resolveMenuSelection(selectionValue, layerIds);
+  emitGroupMenu();
+}
+
+function selectGroup(selectionValue) {
+  if (!hierarchy || !selectedLayerId) {
+    log("selectGroup requires selected layer");
+    return;
+  }
+
+  const groupsInLayer = getGroupsForLayer(selectedLayerId);
+  const groupIds = [];
+  for (let i = 0; i < groupsInLayer.length; i += 1) {
+    groupIds.push(groupsInLayer[i].group_id);
+  }
+
+  selectedGroupId = resolveMenuSelection(selectionValue, groupIds);
+  emitLineMenu();
+}
+
+function selectLine(selectionValue) {
+  if (!hierarchy || !selectedGroupId) {
+    log("selectLine requires selected group");
+    return;
+  }
+
+  const group = getHierarchyGroupById(selectedGroupId);
+  if (!group || !group.line_ids || group.line_ids.length === 0) {
+    log("selectLine requires selected group with lines");
+    return;
+  }
+
+  selectedLineId = resolveMenuSelection(selectionValue, group.line_ids);
 }
 
 function getHierarchyGroupById(groupId) {
