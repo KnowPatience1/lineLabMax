@@ -550,6 +550,10 @@ function appendNamedMenuItem(objectName, itemValue) {
   return sendNamedObjectMessage(objectName, "append", itemValue);
 }
 
+function bangNamedMenu(objectName) {
+  return sendNamedObjectMessage(objectName, "bang");
+}
+
 function resolveMenuSelection(selectionValue, values) {
   if (!values || values.length === 0) {
     return null;
@@ -625,6 +629,7 @@ function emitLineMenu() {
   }
 
   selectedLineId = group.line_ids[0];
+  bangNamedMenu("lMen");
 }
 
 function emitGroupMenu() {
@@ -648,6 +653,7 @@ function emitGroupMenu() {
 
   if (groupsInLayer.length > 0) {
     selectedGroupId = groupsInLayer[0].group_id;
+    bangNamedMenu("gMen");
   } else {
     selectedGroupId = null;
   }
@@ -677,6 +683,7 @@ function emitLayerMenu() {
 
   if (hierarchy.layers.length > 0) {
     selectedLayerId = hierarchy.layers[0].layer_id;
+    bangNamedMenu("aMen");
   } else {
     selectedLayerId = null;
   }
@@ -979,6 +986,8 @@ function buildHierarchy() {
 function setVisible(targetType, targetId, visible) {
   const normalizedType = String(targetType || "").toLowerCase();
   const isVisible = !!visible;
+  
+log("setVisible " + normalizedType + " " + targetId + " " + isVisible);
 
   if (normalizedType === "layer") {
     setLayerVisible(targetId, isVisible);
