@@ -9,9 +9,20 @@
             "modernui": 1
         },
         "classnamespace": "box",
-        "rect": [ 1585.0, 102.0, 731.0, 918.0 ],
+        "rect": [ 1585.0, 101.0, 812.0, 1000.0 ],
         "default_fontsize": 16.0,
         "boxes": [
+            {
+                "box": {
+                    "id": "obj-6",
+                    "maxclass": "message",
+                    "numinlets": 2,
+                    "numoutlets": 1,
+                    "outlettype": [ "" ],
+                    "patching_rect": [ 161.0, 560.0, 70.0, 26.0 ],
+                    "text": "reshuffle"
+                }
+            },
             {
                 "box": {
                     "id": "obj-47",
@@ -127,8 +138,8 @@
                     "numinlets": 2,
                     "numoutlets": 1,
                     "outlettype": [ "" ],
-                    "patching_rect": [ 49.0, 559.0, 149.0, 26.0 ],
-                    "text": "generate $1, render"
+                    "patching_rect": [ 49.0, 560.0, 94.0, 26.0 ],
+                    "text": "generate $1"
                 }
             },
             {
@@ -151,7 +162,7 @@
                     "numoutlets": 1,
                     "outlettype": [ "" ],
                     "parameter_enable": 0,
-                    "patching_rect": [ 81.0, 776.0, 213.0, 26.0 ]
+                    "patching_rect": [ 81.0, 859.0, 213.0, 26.0 ]
                 }
             },
             {
@@ -160,7 +171,7 @@
                     "maxclass": "newobj",
                     "numinlets": 1,
                     "numoutlets": 0,
-                    "patching_rect": [ 49.0, 715.0, 113.0, 26.0 ],
+                    "patching_rect": [ 49.0, 798.0, 113.0, 26.0 ],
                     "text": "print rendered:"
                 }
             },
@@ -194,7 +205,7 @@
                     "numinlets": 1,
                     "numoutlets": 2,
                     "outlettype": [ "", "" ],
-                    "patching_rect": [ 52.5, 820.0, 553.0, 26.0 ],
+                    "patching_rect": [ 53.0, 903.0, 553.0, 26.0 ],
                     "text": "jit.gl.sketch unambiguous @automatic 1 @depth_enable 0 @blend_enable 1"
                 }
             },
@@ -205,7 +216,7 @@
                     "numinlets": 3,
                     "numoutlets": 3,
                     "outlettype": [ "", "", "" ],
-                    "patching_rect": [ 49.0, 668.0, 193.0, 26.0 ],
+                    "patching_rect": [ 49.0, 751.0, 193.0, 26.0 ],
                     "text": "route rendered sketch"
                 }
             },
@@ -215,7 +226,7 @@
                     "maxclass": "newobj",
                     "numinlets": 1,
                     "numoutlets": 0,
-                    "patching_rect": [ 175.0, 715.0, 82.0, 26.0 ],
+                    "patching_rect": [ 175.0, 798.0, 82.0, 26.0 ],
                     "text": "print error:"
                 }
             },
@@ -233,19 +244,19 @@
             },
             {
                 "box": {
-                    "filename": "lineBaseCamp.js",
+                    "filename": "lineBaseNewLines.js",
                     "id": "obj-4",
                     "maxclass": "newobj",
                     "numinlets": 1,
                     "numoutlets": 1,
                     "outlettype": [ "" ],
-                    "patching_rect": [ 49.0, 614.0, 150.0, 26.0 ],
+                    "patching_rect": [ 49.0, 697.0, 177.0, 26.0 ],
                     "saved_object_attributes": {
                         "parameter_enable": 0
                     },
-                    "text": "v8 lineBaseCamp.js",
+                    "text": "v8 lineBaseNewLines.js",
                     "textfile": {
-                        "filename": "lineBaseCamp.js",
+                        "filename": "lineBaseNewLines.js",
                         "flags": 0,
                         "embed": 0,
                         "autowatch": 1
@@ -412,6 +423,12 @@
                 "patchline": {
                     "destination": [ "obj-38", 0 ],
                     "source": [ "obj-44", 0 ]
+                }
+            },
+            {
+                "patchline": {
+                    "destination": [ "obj-4", 0 ],
+                    "source": [ "obj-6", 0 ]
                 }
             },
             {
