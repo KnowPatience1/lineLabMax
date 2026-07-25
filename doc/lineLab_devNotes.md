@@ -1,0 +1,1 @@
+Let the reshuffling of the index first of all be random. We can use some kind of algorithm later. I need to be able to sort the attributes after they are assigned. We are always starting from the immutable set of numbers and playing with a temporary set of the same numbers in a different order.
