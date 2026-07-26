@@ -50,6 +50,10 @@ Syntax: hide group g1
 Syntax: hide line 7  
 Purpose: Convenience wrapper for setVisible ... 0.
 
+11. refreshMenus
+Syntax: refreshMenus
+Purpose: Repopulates aMen -> gMen -> lMen from current hierarchy and re-emits current_layer/current_group/current_line.
+
 Important usage notes:
 1. targetType must be layer, group, or line.
 2. Layer ids are a1, a2, a3...
@@ -66,7 +70,7 @@ const RANDOMS_PER_POINT = 9;
 
 const DEFAULT_LAYER_COUNT_RANGE = { min: 1, max: 4 };
 const DEFAULT_GROUPS_PER_LAYER_RANGE = { min: 1, max: 6 };
-const DEFAULT_LINES_PER_GROUP_RANGE = { min: 1, max: 12 };
+const DEFAULT_LINES_PER_GROUP_RANGE = { min: 1, max: 200 };
 
 let randomPool = null;
 let pointOrder = [];
@@ -511,10 +515,6 @@ function getNamedObject(objectName) {
     return patcher.getnamed(objectName);
   }
 
-  if (typeof globalThis === "object" && globalThis && globalThis.patcher && typeof globalThis.patcher.getnamed === "function") {
-    return globalThis.patcher.getnamed(objectName);
-  }
-
   return null;
 }
 
@@ -530,15 +530,6 @@ function sendNamedObjectMessage(objectName, messageName, value) {
     return true;
   }
 
-  if (typeof messnamed === "function") {
-    if (typeof value === "undefined") {
-      messnamed(objectName, messageName);
-    } else {
-      messnamed(objectName, messageName, value);
-    }
-    return true;
-  }
-
   return false;
 }
 
@@ -550,8 +541,26 @@ function appendNamedMenuItem(objectName, itemValue) {
   return sendNamedObjectMessage(objectName, "append", itemValue);
 }
 
-function bangNamedMenu(objectName) {
-  return sendNamedObjectMessage(objectName, "bang");
+function setNamedMenuSelection(objectName, selectionValue) {
+  if (selectionValue === null || typeof selectionValue === "undefined") {
+    return false;
+  }
+
+  return sendNamedObjectMessage(objectName, "set", selectionValue);
+}
+
+function currentSelectionValue(value) {
+  if (value === null || typeof value === "undefined") {
+    return "none";
+  }
+
+  return value;
+}
+
+function emitCurrentSelection() {
+  outlet(0, "current_layer", currentSelectionValue(selectedLayerId));
+  outlet(0, "current_group", currentSelectionValue(selectedGroupId));
+  outlet(0, "current_line", currentSelectionValue(selectedLineId));
 }
 
 function resolveMenuSelection(selectionValue, values) {
@@ -561,6 +570,20 @@ function resolveMenuSelection(selectionValue, values) {
 
   if (typeof selectionValue === "undefined" || selectionValue === null || selectionValue === "") {
     return values[0];
+  }
+
+  const selectionText = String(selectionValue);
+
+  for (let i = 0; i < values.length; i += 1) {
+    if (values[i] === selectionValue) {
+      return values[i];
+    }
+  }
+
+  for (let i = 0; i < values.length; i += 1) {
+    if (String(values[i]) === selectionText) {
+      return values[i];
+    }
   }
 
   const numericValue = Number(selectionValue);
@@ -575,13 +598,6 @@ function resolveMenuSelection(selectionValue, values) {
     const zeroBasedIndex = Math.floor(numericValue);
     if (zeroBasedIndex >= 0 && zeroBasedIndex < values.length) {
       return values[zeroBasedIndex];
-    }
-  }
-
-  const selectionText = String(selectionValue);
-  for (let i = 0; i < values.length; i += 1) {
-    if (String(values[i]) === selectionText) {
-      return values[i];
     }
   }
 
@@ -610,26 +626,32 @@ function emitLineMenu() {
 
   if (!couldClearMenu) {
     log("emitLineMenu: could not reach lMen");
+    emitCurrentSelection();
     return;
   }
 
   if (!hierarchy || !selectedGroupId) {
     selectedLineId = null;
+    emitCurrentSelection();
     return;
   }
 
   const group = getHierarchyGroupById(selectedGroupId);
   if (!group || !group.line_ids || group.line_ids.length === 0) {
     selectedLineId = null;
+    emitCurrentSelection();
     return;
   }
 
   for (let i = 0; i < group.line_ids.length; i += 1) {
-    appendNamedMenuItem("lMen", group.line_ids[i]);
+    if (!appendNamedMenuItem("lMen", group.line_ids[i])) {
+      log("emitLineMenu: append failed for lMen item " + group.line_ids[i]);
+    }
   }
 
   selectedLineId = group.line_ids[0];
-  bangNamedMenu("lMen");
+  setNamedMenuSelection("lMen", selectedLineId);
+  emitCurrentSelection();
 }
 
 function emitGroupMenu() {
@@ -648,12 +670,14 @@ function emitGroupMenu() {
 
   const groupsInLayer = getGroupsForLayer(selectedLayerId);
   for (let i = 0; i < groupsInLayer.length; i += 1) {
-    appendNamedMenuItem("gMen", groupsInLayer[i].group_id);
+    if (!appendNamedMenuItem("gMen", groupsInLayer[i].group_id)) {
+      log("emitGroupMenu: append failed for gMen item " + groupsInLayer[i].group_id);
+    }
   }
 
   if (groupsInLayer.length > 0) {
     selectedGroupId = groupsInLayer[0].group_id;
-    bangNamedMenu("gMen");
+    setNamedMenuSelection("gMen", selectedGroupId);
   } else {
     selectedGroupId = null;
   }
@@ -678,12 +702,14 @@ function emitLayerMenu() {
   }
 
   for (let i = 0; i < hierarchy.layers.length; i += 1) {
-    appendNamedMenuItem("aMen", hierarchy.layers[i].layer_id);
+    if (!appendNamedMenuItem("aMen", hierarchy.layers[i].layer_id)) {
+      log("emitLayerMenu: append failed for aMen item " + hierarchy.layers[i].layer_id);
+    }
   }
 
   if (hierarchy.layers.length > 0) {
     selectedLayerId = hierarchy.layers[0].layer_id;
-    bangNamedMenu("aMen");
+    setNamedMenuSelection("aMen", selectedLayerId);
   } else {
     selectedLayerId = null;
   }
@@ -789,16 +815,19 @@ function selectGroup(selectionValue) {
 function selectLine(selectionValue) {
   if (!hierarchy || !selectedGroupId) {
     log("selectLine requires selected group");
+    emitCurrentSelection();
     return;
   }
 
   const group = getHierarchyGroupById(selectedGroupId);
   if (!group || !group.line_ids || group.line_ids.length === 0) {
     log("selectLine requires selected group with lines");
+    emitCurrentSelection();
     return;
   }
 
   selectedLineId = resolveMenuSelection(selectionValue, group.line_ids);
+  emitCurrentSelection();
 }
 
 function getHierarchyGroupById(groupId) {
@@ -986,8 +1015,6 @@ function buildHierarchy() {
 function setVisible(targetType, targetId, visible) {
   const normalizedType = String(targetType || "").toLowerCase();
   const isVisible = !!visible;
-  
-log("setVisible " + normalizedType + " " + targetId + " " + isVisible);
 
   if (normalizedType === "layer") {
     setLayerVisible(targetId, isVisible);
@@ -1105,6 +1132,10 @@ function resetHierarchyRanges() {
   if (randomPool && lines.length > 0) {
     buildHierarchy();
   }
+}
+
+function refreshMenus() {
+  emitLayerMenu();
 }
 
 function generate(numLines) {
