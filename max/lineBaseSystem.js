@@ -54,6 +54,73 @@ Purpose: Convenience wrapper for setVisible ... 0.
 Syntax: refreshMenus
 Purpose: Repopulates aMen -> gMen -> lMen from current hierarchy and re-emits current_layer/current_group/current_line.
 
+12. architecture
+Syntax: architecture
+Purpose: Emits architecture counts to the outlet as: architecture layerCount groupCount lineCount.
+  Call architecture directly from Max when needed.
+  Also receive fresh architecture counts automatically on hierarchy rebuild paths (generate, reshuffle, buildHierarchy, range changes).
+
+13. set_pathName nameValue
+Syntax: set_pathName pool_001
+Purpose: Sets the current path name used as the storage key for immutable pool data.
+
+14. get_pathName
+Syntax: get_pathName
+Purpose: Emits the current path name as: pathName nameValue.
+
+15. save_randomPool
+Syntax: save_randomPool
+Purpose: Saves immutable pool-only data to pathName using a timestamped filename: randomPool_hh-mm-ss.json.
+
+16. load_randomPool fullFilePath
+Syntax: load_randomPool /full/path/randomPool_12-30-45.json
+Purpose: Loads immutable pool-only data from a file saved by save_randomPool, then rebuilds and renders.
+
+17. save_view viewId
+Syntax: save_view view_001
+Purpose: Saves mutable view state for the current pool, including form, point order, exact hierarchy, visibility, selections, and hierarchy ranges.
+
+18. load_view fullFilePath
+Syntax: load_view /full/path/view_view_001.json
+Purpose: Loads mutable view state for the currently loaded pool and applies exact hierarchy replay.
+
+19. get_poolId
+Syntax: get_poolId
+Purpose: Emits the current pool id as: pool_id idValue. Emits an empty string when no pool is currently linked.
+
+20. list_views_for_pool poolId
+Syntax: list_views_for_pool pool_2026-07-27_12-30-45
+Purpose: Lists view files in pathName that belong to the given pool id.
+Emits: views_begin poolId count, then view_item poolId viewId fullPath savedAt, then views_end poolId count.
+
+21. set_poolId poolId
+Syntax: set_poolId pool_2026-07-27_12-30-45
+Purpose: Sets the current pool id used by view commands.
+
+22. rebuild_from_loaded_pool
+Syntax: rebuild_from_loaded_pool
+Purpose: Rebuilds lines, hierarchy, menus, and render output from the currently loaded pool using sequential point order.
+
+23. save_index
+Syntax: save_index
+Purpose: Writes or updates pools_index.json in pathName by indexing saved pools and views.
+
+24. load_index
+Syntax: load_index
+Purpose: Loads pools_index.json from pathName into memory for quick browsing and list_views_for_pool.
+
+25. clear_index_cache
+Syntax: clear_index_cache
+Purpose: Clears the in-memory index cache so list_views_for_pool falls back to disk scan.
+
+26. register_view viewId fullViewFilePath
+Syntax: register_view view_001 /full/path/view_view_001.json
+Purpose: Adds or updates a view entry in pools_index.json after external/manual view file saves.
+
+27. unregister_view viewId
+Syntax: unregister_view view_001
+Purpose: Removes stale view entries from pools_index.json by view id.
+
 Important usage notes:
 1. targetType must be layer, group, or line.
 2. Layer ids are a1, a2, a3...
@@ -72,16 +139,28 @@ const DEFAULT_LAYER_COUNT_RANGE = { min: 1, max: 4 };
 const DEFAULT_GROUPS_PER_LAYER_RANGE = { min: 1, max: 6 };
 const DEFAULT_LINES_PER_GROUP_RANGE = { min: 1, max: 200 };
 
+// declare variable for randomPool. This will hold the frozen random values and coordinates for line generation.
 let randomPool = null;
+// declare array for pointOrder. This array will be shuffled to create random line pairings.
 let pointOrder = [];
+// declare array for lineDefinitions. This array will hold the start and end point indices for each line.
 let lineDefinitions = [];
+// declare array for lines. This array will hold the final line objects with coordinates, color, width, and visibility.
+// The line data structure is in the form of { id, start_coords, end_coords, color, line_width, visible }.
 let lines = [];
 let selectedFormName = "cube";
 let hierarchy = null;
+// declare variables for selected layer, group, and line ids. These will be used to track the current selection in the menus.
 let selectedLayerId = null;
 let selectedGroupId = null;
 let selectedLineId = null;
-
+let pathName = "unset";
+let currentPoolId = null;
+let loadedIndexData = null;
+let loadedIndexPath = "";
+// declare a cache object for named objects. This will be used to store references to Max objects by name for faster access.
+const namedObjectCache = {};
+// declare a configuration object for hierarchy ranges. This will hold the min and max values for layer count, groups per layer, and lines per group.
 const hierarchyRangeConfig = {
   layerCount: {
     min: DEFAULT_LAYER_COUNT_RANGE.min,
@@ -99,6 +178,343 @@ const hierarchyRangeConfig = {
 
 function log(msg) {
   post("[lineBaseSystem] " + msg + "\n");
+}
+
+function twoDigitTime(value) {
+  return value < 10 ? "0" + value : String(value);
+}
+
+function currentTimeStampHms() {
+  const now = new Date();
+  const hours = twoDigitTime(now.getHours());
+  const minutes = twoDigitTime(now.getMinutes());
+  const seconds = twoDigitTime(now.getSeconds());
+  return hours + "-" + minutes + "-" + seconds;
+}
+
+function currentDateStampYmd() {
+  const now = new Date();
+  const year = String(now.getFullYear());
+  const month = twoDigitTime(now.getMonth() + 1);
+  const day = twoDigitTime(now.getDate());
+  return year + "-" + month + "-" + day;
+}
+
+function joinPath(folderPath, fileName) {
+  if (!folderPath || folderPath.length === 0) {
+    return fileName;
+  }
+
+  const lastCharacter = folderPath.charAt(folderPath.length - 1);
+  if (lastCharacter === "/" || lastCharacter === "\\") {
+    return folderPath + fileName;
+  }
+
+  return folderPath + "/" + fileName;
+}
+
+function readTextFile(fullPath) {
+  const file = new File(fullPath);
+  if (!file || !file.isopen) {
+    return null;
+  }
+
+  let content = "";
+  const chunkSize = 8192;
+
+  while (file.position < file.eof) {
+    const remaining = file.eof - file.position;
+    const size = remaining > chunkSize ? chunkSize : remaining;
+    content += file.readstring(size);
+  }
+
+  file.close();
+  return content;
+}
+
+function cloneJsonSafe(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function poolChecksumFromRandomValues(randomValues) {
+  let hash = 2166136261;
+
+  for (let i = 0; i < randomValues.length; i += 1) {
+    const token = String(randomValues[i]);
+    for (let j = 0; j < token.length; j += 1) {
+      hash ^= token.charCodeAt(j);
+      hash = (hash * 16777619) >>> 0;
+    }
+    hash ^= 124;
+    hash = (hash * 16777619) >>> 0;
+  }
+
+  return ("00000000" + hash.toString(16)).slice(-8);
+}
+
+function buildRandomPoolFromValues(lineCount, randomValues) {
+  const pointCount = pointCountFromLineCount(lineCount);
+  const randomCount = randomValues.length;
+
+  const coordinates = { x: [], y: [], z: [] };
+  const attributes = {
+    r: [],
+    g: [],
+    b: [],
+    a: [],
+    line_width: []
+  };
+
+  let cursor = 0;
+  for (let i = 0; i < pointCount; i += 1) {
+    coordinates.x.push(mapToRange(randomValues[cursor], 0.0, 1.0));
+    cursor += 1;
+    coordinates.y.push(mapToRange(randomValues[cursor], 0.0, 1.0));
+    cursor += 1;
+    coordinates.z.push(mapToRange(randomValues[cursor], 0.0, 1.0));
+    cursor += 1;
+
+    attributes.r.push(randomValues[cursor]);
+    cursor += 1;
+    attributes.g.push(randomValues[cursor]);
+    cursor += 1;
+    attributes.b.push(randomValues[cursor]);
+    cursor += 1;
+    attributes.a.push(mapToRange(randomValues[cursor], 0.25, 1.0));
+    cursor += 1;
+
+    attributes.line_width.push(mapToRange(randomValues[cursor], 0.01, 0.04));
+    cursor += 1;
+  }
+
+  return {
+    line_count: lineCount,
+    point_count: pointCount,
+    random_count: randomCount,
+    random_values: randomValues,
+    coordinates: coordinates,
+    attributes: attributes
+  };
+}
+
+function isValidLoadedPoolPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  if (payload.type !== "lineBaseSystem.pool") {
+    return false;
+  }
+
+  if (!isFinite(Number(payload.line_count)) || !isFinite(Number(payload.point_count)) || !isFinite(Number(payload.random_count))) {
+    return false;
+  }
+
+  if (!Array.isArray(payload.random_values)) {
+    return false;
+  }
+
+  const lineCount = Number(payload.line_count);
+  const expectedPointCount = pointCountFromLineCount(lineCount);
+  const expectedRandomCount = randomCountFromLineCount(lineCount);
+
+  if (Number(payload.randoms_per_point) !== RANDOMS_PER_POINT) {
+    return false;
+  }
+
+  if (Number(payload.point_count) !== expectedPointCount) {
+    return false;
+  }
+
+  if (Number(payload.random_count) !== expectedRandomCount) {
+    return false;
+  }
+
+  if (payload.random_values.length !== expectedRandomCount) {
+    return false;
+  }
+
+  for (let i = 0; i < payload.random_values.length; i += 1) {
+    if (!isFinite(Number(payload.random_values[i]))) {
+      return false;
+    }
+  }
+
+  if (typeof payload.checksum !== "string" || payload.checksum.length === 0) {
+    return false;
+  }
+
+  return true;
+}
+
+function isValidPointOrderForPool(order, pointCount) {
+  if (!Array.isArray(order) || order.length !== pointCount) {
+    return false;
+  }
+
+  const seen = {};
+  for (let i = 0; i < order.length; i += 1) {
+    const value = Number(order[i]);
+    if (!isFinite(value)) {
+      return false;
+    }
+
+    const index = Math.floor(value);
+    if (index !== value || index < 0 || index >= pointCount) {
+      return false;
+    }
+
+    if (seen[index]) {
+      return false;
+    }
+    seen[index] = true;
+  }
+
+  return true;
+}
+
+function isValidLoadedViewPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  if (payload.type !== "lineBaseSystem.view") {
+    return false;
+  }
+
+  if (typeof payload.view_id !== "string" || payload.view_id.length === 0) {
+    return false;
+  }
+
+  if (typeof payload.pool_id !== "string" || payload.pool_id.length === 0) {
+    return false;
+  }
+
+  if (payload.form !== "cube" && payload.form !== "sphere") {
+    return false;
+  }
+
+  if (!payload.hierarchy || !Array.isArray(payload.hierarchy.layers) || !Array.isArray(payload.hierarchy.groups) || !Array.isArray(payload.hierarchy.ordered_line_ids)) {
+    return false;
+  }
+
+  if (!payload.hierarchy_ranges || !payload.hierarchy_ranges.layerCount || !payload.hierarchy_ranges.groupsPerLayer || !payload.hierarchy_ranges.linesPerGroup) {
+    return false;
+  }
+
+  if (!payload.visibility || !payload.selection) {
+    return false;
+  }
+
+  if (!Array.isArray(payload.point_order)) {
+    return false;
+  }
+
+  return true;
+}
+
+function isValidLoadedIndexPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  if (payload.type !== "lineBaseSystem.index") {
+    return false;
+  }
+
+  if (!Array.isArray(payload.pools)) {
+    return false;
+  }
+
+  for (let i = 0; i < payload.pools.length; i += 1) {
+    const pool = payload.pools[i];
+    if (!pool || typeof pool !== "object") {
+      return false;
+    }
+
+    if (typeof pool.pool_id !== "string" || pool.pool_id.length === 0) {
+      return false;
+    }
+
+    if (!Array.isArray(pool.views)) {
+      return false;
+    }
+
+    for (let j = 0; j < pool.views.length; j += 1) {
+      const view = pool.views[j];
+      if (!view || typeof view !== "object") {
+        return false;
+      }
+
+      if (typeof view.view_id !== "string" || view.view_id.length === 0) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+function applyVisibilityState(visibilityState) {
+  if (!visibilityState || typeof visibilityState !== "object") {
+    return;
+  }
+
+  if (visibilityState.layers && typeof visibilityState.layers === "object") {
+    const layerKeys = Object.keys(visibilityState.layers);
+    for (let i = 0; i < layerKeys.length; i += 1) {
+      const key = layerKeys[i];
+      setLayerVisible(key, !!visibilityState.layers[key]);
+    }
+  }
+
+  if (visibilityState.groups && typeof visibilityState.groups === "object") {
+    const groupKeys = Object.keys(visibilityState.groups);
+    for (let i = 0; i < groupKeys.length; i += 1) {
+      const key = groupKeys[i];
+      setGroupVisible(key, !!visibilityState.groups[key]);
+    }
+  }
+
+  if (visibilityState.lines && typeof visibilityState.lines === "object") {
+    const lineKeys = Object.keys(visibilityState.lines);
+    for (let i = 0; i < lineKeys.length; i += 1) {
+      const key = lineKeys[i];
+      const lineId = Number(key);
+      if (isFinite(lineId)) {
+        setLineVisible(lineId, !!visibilityState.lines[key]);
+      }
+    }
+  }
+}
+
+function captureVisibilityState() {
+  const visibilityState = {
+    layers: {},
+    groups: {},
+    lines: {}
+  };
+
+  if (hierarchy && Array.isArray(hierarchy.layers)) {
+    for (let i = 0; i < hierarchy.layers.length; i += 1) {
+      const layer = hierarchy.layers[i];
+      visibilityState.layers[layer.layer_id] = layer.visible !== false ? 1 : 0;
+    }
+  }
+
+  if (hierarchy && Array.isArray(hierarchy.groups)) {
+    for (let i = 0; i < hierarchy.groups.length; i += 1) {
+      const group = hierarchy.groups[i];
+      visibilityState.groups[group.group_id] = group.visible !== false ? 1 : 0;
+    }
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    visibilityState.lines[String(line.id)] = line.visible !== false ? 1 : 0;
+  }
+
+  return visibilityState;
 }
 
 function mapToRange(value, min, max) {
@@ -331,6 +747,7 @@ function isLayerVisible(layer) {
 }
 
 function createSequentialLineIds(lineCount) {
+  // pushes sequential line ids into an array and returns it. This is used to create a list of line ids for hierarchy generation.
   const lineIds = [];
   for (let i = 0; i < lineCount; i += 1) {
     lineIds.push(i);
@@ -518,16 +935,52 @@ function getNamedObject(objectName) {
   return null;
 }
 
-function sendNamedObjectMessage(objectName, messageName, value) {
+function getCachedNamedObject(objectName, forceRefresh) {
+  if (!forceRefresh && namedObjectCache[objectName] && typeof namedObjectCache[objectName].message === "function") {
+    return namedObjectCache[objectName];
+  }
+
   const namedObject = getNamedObject(objectName);
+  if (namedObject && typeof namedObject.message === "function") {
+    namedObjectCache[objectName] = namedObject;
+    return namedObject;
+  }
+
+  namedObjectCache[objectName] = null;
+  return null;
+}
+
+function sendNamedObjectMessage(objectName, messageName, value) {
+  let namedObject = getCachedNamedObject(objectName, false);
+
+  if (!namedObject) {
+    return false;
+  }
+
+  function deliver(target) {
+    if (typeof value === "undefined") {
+      target.message(messageName);
+    } else {
+      target.message(messageName, value);
+    }
+  }
+
+  try {
+    deliver(namedObject);
+    return true;
+  } catch (error) {
+    namedObjectCache[objectName] = null;
+  }
+
+  namedObject = getCachedNamedObject(objectName, true);
 
   if (namedObject && typeof namedObject.message === "function") {
-    if (typeof value === "undefined") {
-      namedObject.message(messageName);
-    } else {
-      namedObject.message(messageName, value);
+    try {
+      deliver(namedObject);
+      return true;
+    } catch (error) {
+      namedObjectCache[objectName] = null;
     }
-    return true;
   }
 
   return false;
@@ -721,6 +1174,7 @@ function buildHierarchyFromCurrentLines() {
   if (!lines || lines.length === 0) {
     hierarchy = null;
     emitLayerMenu();
+    architecture();
     return;
   }
 
@@ -779,6 +1233,7 @@ function buildHierarchyFromCurrentLines() {
   };
 
   emitLayerMenu();
+  architecture();
 }
 
 function selectLayer(selectionValue) {
@@ -968,6 +1423,1012 @@ function emitRenderCommands() {
   outlet(0, "rendered", lines.length);
 }
 
+function architecture() {
+  const layerCount = hierarchy && hierarchy.layers ? hierarchy.layers.length : 0;
+  const groupCount = hierarchy && hierarchy.groups ? hierarchy.groups.length : 0;
+  const lineCount = lines ? lines.length : 0;
+
+  outlet(0, "architecture", layerCount, groupCount, lineCount);
+}
+
+function set_pathName(nameValue) {
+  const resolvedName = String(nameValue || "").trim();
+
+  if (resolvedName.length === 0) {
+    log("set_pathName requires a non-empty name");
+    return;
+  }
+
+  pathName = resolvedName;
+}
+
+function get_pathName() {
+  outlet(0, "pathName", pathName);
+}
+
+function get_poolId() {
+  outlet(0, "pool_id", currentPoolId || "");
+}
+
+function set_poolId(poolId) {
+  const resolvedPoolId = String(poolId || "").trim();
+  if (resolvedPoolId.length === 0) {
+    log("set_poolId requires a non-empty poolId");
+    return;
+  }
+
+  currentPoolId = resolvedPoolId;
+  outlet(0, "pool_id", currentPoolId);
+}
+
+function rebuild_from_loaded_pool() {
+  if (!randomPool) {
+    log("rebuild_from_loaded_pool requires loaded pool data");
+    return;
+  }
+
+  pointOrder = createPointOrder(randomPool.point_count);
+  rebuildSystemFromCurrentState();
+  emitRenderCommands();
+
+  outlet(0, "rebuilt_from_loaded_pool", currentPoolId || "", randomPool.line_count);
+}
+
+function list_views_for_pool(poolId) {
+  const resolvedPoolId = String(poolId || "").trim();
+  if (resolvedPoolId.length === 0) {
+    log("list_views_for_pool requires a non-empty poolId");
+    return;
+  }
+
+  const targetPath = String(pathName || "").trim();
+  if (targetPath.length === 0 || targetPath === "unset") {
+    log("list_views_for_pool requires pathName to be set");
+    return;
+  }
+
+  if (loadedIndexData && loadedIndexData.path_name === targetPath && Array.isArray(loadedIndexData.pools)) {
+    let indexedPool = null;
+
+    for (let i = 0; i < loadedIndexData.pools.length; i += 1) {
+      if (loadedIndexData.pools[i].pool_id === resolvedPoolId) {
+        indexedPool = loadedIndexData.pools[i];
+        break;
+      }
+    }
+
+    const indexedViews = indexedPool && Array.isArray(indexedPool.views) ? indexedPool.views.slice() : [];
+
+    indexedViews.sort(function(a, b) {
+      const aViewId = typeof a.view_id === "string" ? a.view_id : "";
+      const bViewId = typeof b.view_id === "string" ? b.view_id : "";
+      if (aViewId < bViewId) {
+        return -1;
+      }
+      if (aViewId > bViewId) {
+        return 1;
+      }
+
+      const aSavedAt = typeof a.saved_at === "string" ? a.saved_at : "";
+      const bSavedAt = typeof b.saved_at === "string" ? b.saved_at : "";
+      if (aSavedAt < bSavedAt) {
+        return -1;
+      }
+      if (aSavedAt > bSavedAt) {
+        return 1;
+      }
+
+      const aPath = typeof a.view_file === "string" ? a.view_file : "";
+      const bPath = typeof b.view_file === "string" ? b.view_file : "";
+      if (aPath < bPath) {
+        return -1;
+      }
+      if (aPath > bPath) {
+        return 1;
+      }
+
+      return 0;
+    });
+
+    outlet(0, "views_begin", resolvedPoolId, indexedViews.length);
+
+    for (let i = 0; i < indexedViews.length; i += 1) {
+      const item = indexedViews[i];
+      const savedAt = typeof item.saved_at === "string" ? item.saved_at : "";
+      const viewFile = typeof item.view_file === "string" ? item.view_file : "";
+      const viewId = typeof item.view_id === "string" ? item.view_id : "";
+      outlet(0, "view_item", resolvedPoolId, viewId, viewFile, savedAt);
+    }
+
+    outlet(0, "views_end", resolvedPoolId, indexedViews.length);
+    return;
+  }
+
+  let folder;
+  try {
+    folder = new Folder(targetPath);
+  } catch (error) {
+    log("list_views_for_pool could not open folder: " + targetPath);
+    return;
+  }
+
+  if (!folder) {
+    log("list_views_for_pool could not open folder: " + targetPath);
+    return;
+  }
+
+  const matches = [];
+  let safetyCounter = 0;
+  const maxEntries = 100000;
+
+  while (!folder.end && safetyCounter < maxEntries) {
+    const fileName = String(folder.filename || "");
+    const lowerName = fileName.toLowerCase();
+    const isViewJson =
+      fileName !== "." &&
+      fileName !== ".." &&
+      lowerName.indexOf("view_") === 0 &&
+      lowerName.slice(-5) === ".json";
+
+    if (isViewJson) {
+      const fullPath = joinPath(targetPath, fileName);
+      const rawText = readTextFile(fullPath);
+
+      if (rawText !== null) {
+        try {
+          const payload = JSON.parse(rawText);
+          const isValidView =
+            payload &&
+            payload.type === "lineBaseSystem.view" &&
+            payload.pool_id === resolvedPoolId;
+
+          if (isValidView) {
+            const savedAt = typeof payload.saved_at === "string" ? payload.saved_at : "";
+            const viewId =
+              typeof payload.view_id === "string" && payload.view_id.length > 0
+                ? payload.view_id
+                : fileName.replace(/^view_/i, "").replace(/\.json$/i, "");
+
+            matches.push({
+              view_id: viewId,
+              full_path: fullPath,
+              saved_at: savedAt
+            });
+          }
+        } catch (error) {
+          // Ignore malformed files while scanning for valid view payloads.
+        }
+      }
+    }
+
+    folder.next();
+    safetyCounter += 1;
+  }
+
+  if (typeof folder.close === "function") {
+    folder.close();
+  }
+
+  matches.sort(function(a, b) {
+    if (a.view_id < b.view_id) {
+      return -1;
+    }
+    if (a.view_id > b.view_id) {
+      return 1;
+    }
+
+    if (a.saved_at < b.saved_at) {
+      return -1;
+    }
+    if (a.saved_at > b.saved_at) {
+      return 1;
+    }
+
+    if (a.full_path < b.full_path) {
+      return -1;
+    }
+    if (a.full_path > b.full_path) {
+      return 1;
+    }
+
+    return 0;
+  });
+
+  outlet(0, "views_begin", resolvedPoolId, matches.length);
+
+  for (let i = 0; i < matches.length; i += 1) {
+    const item = matches[i];
+    outlet(0, "view_item", resolvedPoolId, item.view_id, item.full_path, item.saved_at);
+  }
+
+  outlet(0, "views_end", resolvedPoolId, matches.length);
+}
+
+function save_index() {
+  const targetPath = String(pathName || "").trim();
+  if (targetPath.length === 0 || targetPath === "unset") {
+    log("save_index requires pathName to be set");
+    return;
+  }
+
+  let folder;
+  try {
+    folder = new Folder(targetPath);
+  } catch (error) {
+    log("save_index could not open folder: " + targetPath);
+    return;
+  }
+
+  if (!folder) {
+    log("save_index could not open folder: " + targetPath);
+    return;
+  }
+
+  const poolsById = {};
+  const viewsByPoolId = {};
+  let totalViewCount = 0;
+  let safetyCounter = 0;
+  const maxEntries = 100000;
+
+  while (!folder.end && safetyCounter < maxEntries) {
+    const fileName = String(folder.filename || "");
+    const lowerName = fileName.toLowerCase();
+    const isJsonFile =
+      fileName !== "." &&
+      fileName !== ".." &&
+      lowerName.slice(-5) === ".json";
+
+    if (isJsonFile) {
+      const fullPath = joinPath(targetPath, fileName);
+      const rawText = readTextFile(fullPath);
+
+      if (rawText !== null) {
+        let payload = null;
+        try {
+          payload = JSON.parse(rawText);
+        } catch (error) {
+          payload = null;
+        }
+
+        if (payload && payload.type === "lineBaseSystem.pool") {
+          const poolId = typeof payload.pool_id === "string" ? payload.pool_id : "";
+          if (poolId.length > 0 && isValidLoadedPoolPayload(payload)) {
+            if (!poolsById[poolId]) {
+              poolsById[poolId] = {
+                pool_id: poolId,
+                pool_file: fullPath,
+                created_at: typeof payload.created_at === "string" ? payload.created_at : "",
+                line_count: Number(payload.line_count),
+                point_count: Number(payload.point_count),
+                random_count: Number(payload.random_count)
+              };
+            } else if (fullPath < poolsById[poolId].pool_file) {
+              poolsById[poolId].pool_file = fullPath;
+            }
+          }
+        } else if (payload && payload.type === "lineBaseSystem.view") {
+          const poolId = typeof payload.pool_id === "string" ? payload.pool_id : "";
+          if (poolId.length > 0) {
+            if (!viewsByPoolId[poolId]) {
+              viewsByPoolId[poolId] = [];
+            }
+
+            const viewId =
+              typeof payload.view_id === "string" && payload.view_id.length > 0
+                ? payload.view_id
+                : fileName.replace(/^view_/i, "").replace(/\.json$/i, "");
+
+            viewsByPoolId[poolId].push({
+              view_id: viewId,
+              view_file: fullPath,
+              saved_at: typeof payload.saved_at === "string" ? payload.saved_at : ""
+            });
+            totalViewCount += 1;
+          }
+        }
+      }
+    }
+
+    folder.next();
+    safetyCounter += 1;
+  }
+
+  if (typeof folder.close === "function") {
+    folder.close();
+  }
+
+  const poolIdsByFile = Object.keys(poolsById);
+  const poolIdsByView = Object.keys(viewsByPoolId);
+  const poolIdLookup = {};
+
+  for (let i = 0; i < poolIdsByFile.length; i += 1) {
+    poolIdLookup[poolIdsByFile[i]] = true;
+  }
+  for (let i = 0; i < poolIdsByView.length; i += 1) {
+    poolIdLookup[poolIdsByView[i]] = true;
+  }
+
+  const allPoolIds = Object.keys(poolIdLookup).sort();
+  const pools = [];
+
+  for (let i = 0; i < allPoolIds.length; i += 1) {
+    const poolId = allPoolIds[i];
+    const poolMeta = poolsById[poolId] || null;
+    const viewItems = viewsByPoolId[poolId] ? viewsByPoolId[poolId].slice() : [];
+
+    viewItems.sort(function(a, b) {
+      if (a.view_id < b.view_id) {
+        return -1;
+      }
+      if (a.view_id > b.view_id) {
+        return 1;
+      }
+
+      if (a.saved_at < b.saved_at) {
+        return -1;
+      }
+      if (a.saved_at > b.saved_at) {
+        return 1;
+      }
+
+      if (a.view_file < b.view_file) {
+        return -1;
+      }
+      if (a.view_file > b.view_file) {
+        return 1;
+      }
+
+      return 0;
+    });
+
+    pools.push({
+      pool_id: poolId,
+      pool_file: poolMeta ? poolMeta.pool_file : "",
+      created_at: poolMeta ? poolMeta.created_at : "",
+      line_count: poolMeta ? poolMeta.line_count : null,
+      point_count: poolMeta ? poolMeta.point_count : null,
+      random_count: poolMeta ? poolMeta.random_count : null,
+      view_count: viewItems.length,
+      views: viewItems
+    });
+  }
+
+  const indexPayload = {
+    type: "lineBaseSystem.index",
+    version: 1,
+    saved_at: new Date().toISOString(),
+    path_name: targetPath,
+    pool_count: pools.length,
+    view_count: totalViewCount,
+    pools: pools
+  };
+
+  const indexPath = joinPath(targetPath, "pools_index.json");
+  const serialized = JSON.stringify(indexPayload, null, 2);
+  const file = new File(indexPath, "write", "TEXT");
+  if (!file || !file.isopen) {
+    log("save_index could not open file: " + indexPath);
+    return;
+  }
+
+  file.writestring(serialized);
+  file.close();
+
+  loadedIndexData = indexPayload;
+  loadedIndexPath = indexPath;
+
+  outlet(0, "index_saved", indexPath, indexPayload.pool_count, indexPayload.view_count);
+}
+
+function load_index() {
+  const targetPath = String(pathName || "").trim();
+  if (targetPath.length === 0 || targetPath === "unset") {
+    log("load_index requires pathName to be set");
+    return;
+  }
+
+  const indexPath = joinPath(targetPath, "pools_index.json");
+  const rawText = readTextFile(indexPath);
+  if (rawText === null) {
+    log("load_index could not open file: " + indexPath);
+    return;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (error) {
+    log("load_index could not parse JSON: " + indexPath);
+    return;
+  }
+
+  if (!isValidLoadedIndexPayload(parsed)) {
+    log("load_index invalid index payload: " + indexPath);
+    return;
+  }
+
+  parsed.path_name = targetPath;
+  loadedIndexData = parsed;
+  loadedIndexPath = indexPath;
+
+  const poolCount = Array.isArray(parsed.pools) ? parsed.pools.length : 0;
+  let viewCount = 0;
+  for (let i = 0; i < poolCount; i += 1) {
+    const views = Array.isArray(parsed.pools[i].views) ? parsed.pools[i].views : [];
+    viewCount += views.length;
+  }
+
+  outlet(0, "index_loaded", loadedIndexPath, poolCount, viewCount);
+}
+
+function clear_index_cache() {
+  const previousPath = loadedIndexPath || "";
+  const hadCache = loadedIndexData ? 1 : 0;
+
+  loadedIndexData = null;
+  loadedIndexPath = "";
+
+  outlet(0, "index_cache_cleared", previousPath, hadCache);
+}
+
+function register_view(viewId, fullViewFilePath) {
+  const resolvedViewId = String(viewId || "").trim();
+  if (resolvedViewId.length === 0) {
+    log("register_view requires a non-empty viewId");
+    return;
+  }
+
+  const viewPath = String(fullViewFilePath || "").trim();
+  if (viewPath.length === 0) {
+    log("register_view requires a full view file path");
+    return;
+  }
+
+  const targetPath = String(pathName || "").trim();
+  if (targetPath.length === 0 || targetPath === "unset") {
+    log("register_view requires pathName to be set");
+    return;
+  }
+
+  const rawViewText = readTextFile(viewPath);
+  if (rawViewText === null) {
+    log("register_view could not open view file: " + viewPath);
+    return;
+  }
+
+  let viewPayload;
+  try {
+    viewPayload = JSON.parse(rawViewText);
+  } catch (error) {
+    log("register_view could not parse JSON: " + viewPath);
+    return;
+  }
+
+  if (!isValidLoadedViewPayload(viewPayload)) {
+    log("register_view invalid view payload: " + viewPath);
+    return;
+  }
+
+  const poolId = String(viewPayload.pool_id || "").trim();
+  if (poolId.length === 0) {
+    log("register_view missing pool_id in view file: " + viewPath);
+    return;
+  }
+
+  const savedAt = typeof viewPayload.saved_at === "string" ? viewPayload.saved_at : "";
+  const indexPath = joinPath(targetPath, "pools_index.json");
+
+  let indexPayload = null;
+  if (loadedIndexData && loadedIndexData.path_name === targetPath && Array.isArray(loadedIndexData.pools)) {
+    indexPayload = cloneJsonSafe(loadedIndexData);
+  } else {
+    const rawIndexText = readTextFile(indexPath);
+    if (rawIndexText !== null) {
+      try {
+        const parsedIndex = JSON.parse(rawIndexText);
+        if (isValidLoadedIndexPayload(parsedIndex)) {
+          indexPayload = parsedIndex;
+        }
+      } catch (error) {
+        indexPayload = null;
+      }
+    }
+  }
+
+  if (!indexPayload) {
+    indexPayload = {
+      type: "lineBaseSystem.index",
+      version: 1,
+      saved_at: "",
+      path_name: targetPath,
+      pool_count: 0,
+      view_count: 0,
+      pools: []
+    };
+  }
+
+  indexPayload.path_name = targetPath;
+
+  let poolEntry = null;
+  for (let i = 0; i < indexPayload.pools.length; i += 1) {
+    if (indexPayload.pools[i].pool_id === poolId) {
+      poolEntry = indexPayload.pools[i];
+      break;
+    }
+  }
+
+  if (!poolEntry) {
+    poolEntry = {
+      pool_id: poolId,
+      pool_file: "",
+      created_at: "",
+      line_count: null,
+      point_count: null,
+      random_count: null,
+      view_count: 0,
+      views: []
+    };
+    indexPayload.pools.push(poolEntry);
+  }
+
+  if (!Array.isArray(poolEntry.views)) {
+    poolEntry.views = [];
+  }
+
+  let updatedExisting = false;
+  for (let i = 0; i < poolEntry.views.length; i += 1) {
+    const existing = poolEntry.views[i];
+    if ((existing && existing.view_id === resolvedViewId) || (existing && existing.view_file === viewPath)) {
+      poolEntry.views[i] = {
+        view_id: resolvedViewId,
+        view_file: viewPath,
+        saved_at: savedAt
+      };
+      updatedExisting = true;
+      break;
+    }
+  }
+
+  if (!updatedExisting) {
+    poolEntry.views.push({
+      view_id: resolvedViewId,
+      view_file: viewPath,
+      saved_at: savedAt
+    });
+  }
+
+  for (let i = 0; i < indexPayload.pools.length; i += 1) {
+    const entry = indexPayload.pools[i];
+    if (!Array.isArray(entry.views)) {
+      entry.views = [];
+    }
+
+    entry.views.sort(function(a, b) {
+      const aViewId = typeof a.view_id === "string" ? a.view_id : "";
+      const bViewId = typeof b.view_id === "string" ? b.view_id : "";
+      if (aViewId < bViewId) {
+        return -1;
+      }
+      if (aViewId > bViewId) {
+        return 1;
+      }
+
+      const aSavedAt = typeof a.saved_at === "string" ? a.saved_at : "";
+      const bSavedAt = typeof b.saved_at === "string" ? b.saved_at : "";
+      if (aSavedAt < bSavedAt) {
+        return -1;
+      }
+      if (aSavedAt > bSavedAt) {
+        return 1;
+      }
+
+      const aFile = typeof a.view_file === "string" ? a.view_file : "";
+      const bFile = typeof b.view_file === "string" ? b.view_file : "";
+      if (aFile < bFile) {
+        return -1;
+      }
+      if (aFile > bFile) {
+        return 1;
+      }
+
+      return 0;
+    });
+
+    entry.view_count = entry.views.length;
+  }
+
+  indexPayload.pools.sort(function(a, b) {
+    const aPoolId = typeof a.pool_id === "string" ? a.pool_id : "";
+    const bPoolId = typeof b.pool_id === "string" ? b.pool_id : "";
+    if (aPoolId < bPoolId) {
+      return -1;
+    }
+    if (aPoolId > bPoolId) {
+      return 1;
+    }
+    return 0;
+  });
+
+  indexPayload.pool_count = indexPayload.pools.length;
+  let totalViewCount = 0;
+  for (let i = 0; i < indexPayload.pools.length; i += 1) {
+    totalViewCount += Array.isArray(indexPayload.pools[i].views) ? indexPayload.pools[i].views.length : 0;
+  }
+  indexPayload.view_count = totalViewCount;
+  indexPayload.saved_at = new Date().toISOString();
+
+  const serialized = JSON.stringify(indexPayload, null, 2);
+  const file = new File(indexPath, "write", "TEXT");
+  if (!file || !file.isopen) {
+    log("register_view could not open index file: " + indexPath);
+    return;
+  }
+
+  file.writestring(serialized);
+  file.close();
+
+  loadedIndexData = indexPayload;
+  loadedIndexPath = indexPath;
+
+  outlet(0, "view_registered", resolvedViewId, viewPath, poolId, indexPath);
+}
+
+function unregister_view(viewId) {
+  const resolvedViewId = String(viewId || "").trim();
+  if (resolvedViewId.length === 0) {
+    log("unregister_view requires a non-empty viewId");
+    return;
+  }
+
+  const targetPath = String(pathName || "").trim();
+  if (targetPath.length === 0 || targetPath === "unset") {
+    log("unregister_view requires pathName to be set");
+    return;
+  }
+
+  const indexPath = joinPath(targetPath, "pools_index.json");
+  let indexPayload = null;
+
+  if (loadedIndexData && loadedIndexData.path_name === targetPath && Array.isArray(loadedIndexData.pools)) {
+    indexPayload = cloneJsonSafe(loadedIndexData);
+  } else {
+    const rawIndexText = readTextFile(indexPath);
+    if (rawIndexText === null) {
+      log("unregister_view could not open index file: " + indexPath);
+      return;
+    }
+
+    try {
+      const parsedIndex = JSON.parse(rawIndexText);
+      if (!isValidLoadedIndexPayload(parsedIndex)) {
+        log("unregister_view invalid index payload: " + indexPath);
+        return;
+      }
+      indexPayload = parsedIndex;
+    } catch (error) {
+      log("unregister_view could not parse JSON: " + indexPath);
+      return;
+    }
+  }
+
+  let removedCount = 0;
+  indexPayload.path_name = targetPath;
+
+  for (let i = 0; i < indexPayload.pools.length; i += 1) {
+    const poolEntry = indexPayload.pools[i];
+    const existingViews = Array.isArray(poolEntry.views) ? poolEntry.views : [];
+    const filteredViews = [];
+
+    for (let j = 0; j < existingViews.length; j += 1) {
+      const viewEntry = existingViews[j];
+      if (viewEntry && viewEntry.view_id === resolvedViewId) {
+        removedCount += 1;
+      } else {
+        filteredViews.push(viewEntry);
+      }
+    }
+
+    poolEntry.views = filteredViews;
+    poolEntry.view_count = filteredViews.length;
+  }
+
+  indexPayload.pool_count = Array.isArray(indexPayload.pools) ? indexPayload.pools.length : 0;
+  let totalViewCount = 0;
+  for (let i = 0; i < indexPayload.pools.length; i += 1) {
+    totalViewCount += Array.isArray(indexPayload.pools[i].views) ? indexPayload.pools[i].views.length : 0;
+  }
+  indexPayload.view_count = totalViewCount;
+  indexPayload.saved_at = new Date().toISOString();
+
+  const serialized = JSON.stringify(indexPayload, null, 2);
+  const file = new File(indexPath, "write", "TEXT");
+  if (!file || !file.isopen) {
+    log("unregister_view could not open index file: " + indexPath);
+    return;
+  }
+
+  file.writestring(serialized);
+  file.close();
+
+  loadedIndexData = indexPayload;
+  loadedIndexPath = indexPath;
+
+  outlet(0, "view_unregistered", resolvedViewId, removedCount, indexPath);
+}
+
+function save_randomPool() {
+  if (!randomPool) {
+    log("save_randomPool requires generated data");
+    return;
+  }
+
+  const targetPath = String(pathName || "").trim();
+  if (targetPath.length === 0 || targetPath === "unset") {
+    log("save_randomPool requires pathName to be set");
+    return;
+  }
+
+  const timestamp = currentTimeStampHms();
+  const dateStamp = currentDateStampYmd();
+  const fileName = "randomPool_" + timestamp + ".json";
+  const fullPath = joinPath(targetPath, fileName);
+  const poolId = "pool_" + dateStamp + "_" + timestamp;
+  const sourceRandomValues = randomPool.random_values.slice();
+
+  const payload = {
+    type: "lineBaseSystem.pool",
+    version: 1,
+    pool_id: poolId,
+    created_at: new Date().toISOString(),
+    randoms_per_point: RANDOMS_PER_POINT,
+    line_count: randomPool.line_count,
+    point_count: randomPool.point_count,
+    random_count: randomPool.random_count,
+    random_values: sourceRandomValues,
+    checksum: poolChecksumFromRandomValues(sourceRandomValues)
+  };
+
+  const serialized = JSON.stringify(payload, null, 2);
+  const file = new File(fullPath, "write", "TEXT");
+
+  if (!file || !file.isopen) {
+    log("save_randomPool could not open file: " + fullPath);
+    return;
+  }
+
+  file.writestring(serialized);
+  file.close();
+
+  currentPoolId = payload.pool_id;
+
+  outlet(0, "randomPool_saved", fullPath, payload.pool_id);
+}
+
+function load_randomPool(fullFilePath) {
+  const sourcePath = String(fullFilePath || "").trim();
+
+  if (sourcePath.length === 0) {
+    log("load_randomPool requires a full file path");
+    return;
+  }
+
+  const rawText = readTextFile(sourcePath);
+  if (rawText === null) {
+    log("load_randomPool could not open file: " + sourcePath);
+    return;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (error) {
+    log("load_randomPool could not parse JSON: " + sourcePath);
+    return;
+  }
+
+  if (!isValidLoadedPoolPayload(parsed)) {
+    log("load_randomPool invalid pool payload: " + sourcePath);
+    return;
+  }
+
+  const expectedChecksum = poolChecksumFromRandomValues(parsed.random_values);
+  if (expectedChecksum !== parsed.checksum) {
+    log("load_randomPool checksum mismatch: " + sourcePath);
+    return;
+  }
+
+  const lineCount = Number(parsed.line_count);
+  const sourceRandomValues = parsed.random_values.slice();
+  const rebuiltPool = buildRandomPoolFromValues(lineCount, sourceRandomValues);
+
+  randomPool = deepFreezeObject(rebuiltPool);
+  if (!verifyPoolIsLocked(randomPool)) {
+    log("load_randomPool lock verification failed: " + sourcePath);
+    return;
+  }
+
+  pointOrder = createPointOrder(randomPool.point_count);
+  rebuildSystemFromCurrentState();
+  emitRenderCommands();
+
+  currentPoolId = parsed.pool_id;
+
+  outlet(0, "randomPool_loaded", sourcePath, parsed.pool_id, randomPool.line_count);
+}
+
+function save_view(viewId) {
+  if (!randomPool || !hierarchy) {
+    log("save_view requires generated data");
+    return;
+  }
+
+  if (!currentPoolId) {
+    log("save_view requires a loaded/saved pool_id");
+    return;
+  }
+
+  const targetPath = String(pathName || "").trim();
+  if (targetPath.length === 0 || targetPath === "unset") {
+    log("save_view requires pathName to be set");
+    return;
+  }
+
+  const resolvedViewId = String(viewId || "").trim();
+  if (resolvedViewId.length === 0) {
+    log("save_view requires a non-empty viewId");
+    return;
+  }
+
+  const fileName = "view_" + resolvedViewId + ".json";
+  const fullPath = joinPath(targetPath, fileName);
+
+  const payload = {
+    type: "lineBaseSystem.view",
+    version: 1,
+    view_id: resolvedViewId,
+    pool_id: currentPoolId,
+    saved_at: new Date().toISOString(),
+    form: selectedFormName,
+    point_order: pointOrder.slice(),
+    hierarchy: cloneJsonSafe(hierarchy),
+    hierarchy_ranges: cloneJsonSafe(hierarchyRangeConfig),
+    visibility: captureVisibilityState(),
+    selection: {
+      layer_id: selectedLayerId,
+      group_id: selectedGroupId,
+      line_id: selectedLineId
+    }
+  };
+
+  const serialized = JSON.stringify(payload, null, 2);
+  const file = new File(fullPath, "write", "TEXT");
+  if (!file || !file.isopen) {
+    log("save_view could not open file: " + fullPath);
+    return;
+  }
+
+  file.writestring(serialized);
+  file.close();
+
+  outlet(0, "view_saved", fullPath, payload.view_id, payload.pool_id);
+}
+
+function load_view(fullFilePath) {
+  if (!randomPool) {
+    log("load_view requires loaded pool data");
+    return;
+  }
+
+  const sourcePath = String(fullFilePath || "").trim();
+  if (sourcePath.length === 0) {
+    log("load_view requires a full file path");
+    return;
+  }
+
+  const rawText = readTextFile(sourcePath);
+  if (rawText === null) {
+    log("load_view could not open file: " + sourcePath);
+    return;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (error) {
+    log("load_view could not parse JSON: " + sourcePath);
+    return;
+  }
+
+  if (!isValidLoadedViewPayload(parsed)) {
+    log("load_view invalid view payload: " + sourcePath);
+    return;
+  }
+
+  if (!currentPoolId || parsed.pool_id !== currentPoolId) {
+    log("load_view pool_id mismatch: expected " + currentPoolId + " got " + parsed.pool_id);
+    return;
+  }
+
+  if (!isValidPointOrderForPool(parsed.point_order, randomPool.point_count)) {
+    log("load_view invalid point order: " + sourcePath);
+    return;
+  }
+
+  selectedFormName = parsed.form;
+  pointOrder = parsed.point_order.slice();
+  rebuildLinesFromCurrentOrder();
+
+  hierarchy = cloneJsonSafe(parsed.hierarchy);
+
+  const safeLayerRange = sanitizeRange(
+    parsed.hierarchy_ranges.layerCount.min,
+    parsed.hierarchy_ranges.layerCount.max,
+    DEFAULT_LAYER_COUNT_RANGE.min,
+    DEFAULT_LAYER_COUNT_RANGE.max
+  );
+
+  const safeGroupRange = sanitizeRange(
+    parsed.hierarchy_ranges.groupsPerLayer.min,
+    parsed.hierarchy_ranges.groupsPerLayer.max,
+    DEFAULT_GROUPS_PER_LAYER_RANGE.min,
+    DEFAULT_GROUPS_PER_LAYER_RANGE.max
+  );
+
+  const safeLineRange = sanitizeRange(
+    parsed.hierarchy_ranges.linesPerGroup.min,
+    parsed.hierarchy_ranges.linesPerGroup.max,
+    DEFAULT_LINES_PER_GROUP_RANGE.min,
+    DEFAULT_LINES_PER_GROUP_RANGE.max
+  );
+
+  hierarchyRangeConfig.layerCount = safeLayerRange;
+  hierarchyRangeConfig.groupsPerLayer = safeGroupRange;
+  hierarchyRangeConfig.linesPerGroup = safeLineRange;
+
+  const lineById = {};
+  for (let i = 0; i < lines.length; i += 1) {
+    lineById[lines[i].id] = lines[i];
+  }
+
+  if (hierarchy && Array.isArray(hierarchy.groups)) {
+    for (let i = 0; i < hierarchy.groups.length; i += 1) {
+      const group = hierarchy.groups[i];
+      if (!Array.isArray(group.line_ids)) {
+        group.line_ids = [];
+      }
+
+      for (let j = 0; j < group.line_ids.length; j += 1) {
+        const lineId = Number(group.line_ids[j]);
+        const line = lineById[lineId];
+        if (line) {
+          line.group_id = group.group_id;
+          line.layer_id = group.layer_id;
+        }
+      }
+    }
+  }
+
+  applyHierarchyLineOrder();
+  applyVisibilityState(parsed.visibility);
+
+  emitLayerMenu();
+
+  if (parsed.selection && parsed.selection.layer_id) {
+    selectLayer(parsed.selection.layer_id);
+  }
+  if (parsed.selection && parsed.selection.group_id) {
+    selectGroup(parsed.selection.group_id);
+  }
+  if (parsed.selection && parsed.selection.line_id !== null && typeof parsed.selection.line_id !== "undefined") {
+    selectLine(parsed.selection.line_id);
+  }
+
+  architecture();
+  emitRenderCommands();
+
+  outlet(0, "view_loaded", sourcePath, parsed.view_id, parsed.pool_id);
+}
+
 function reportHierarchy() {
   if (!hierarchy) {
     log("reportHierarchy requires generated data");
@@ -1147,6 +2608,7 @@ function generate(numLines) {
   }
 
   randomPool = deepFreezeObject(buildRandomPool(count));
+  currentPoolId = null;
 
   if (!verifyPoolIsLocked(randomPool)) {
     log("randomPool lock failed");
