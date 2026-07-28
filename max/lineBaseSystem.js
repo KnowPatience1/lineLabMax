@@ -102,12 +102,13 @@ Syntax: rebuild_from_loaded_pool
 Purpose: Rebuilds lines, hierarchy, menus, and render output from the currently loaded pool using sequential point order.
 
 23. save_index
-Syntax: save_index
+Syntax: save_index (requires pathName to be set)
 Purpose: Writes or updates pools_index.json in pathName by indexing saved pools and views.
 
 24. load_index
-Syntax: load_index
+Syntax: load_index (requires pathName to be set)
 Purpose: Loads pools_index.json from pathName into memory for quick browsing and list_views_for_pool.
+Emits: index_loaded pathName poolCount viewCount
 
 25. clear_index_cache
 Syntax: clear_index_cache
@@ -121,11 +122,26 @@ Purpose: Adds or updates a view entry in pools_index.json after external/manual 
 Syntax: unregister_view view_001
 Purpose: Removes stale view entries from pools_index.json by view id.
 
+28. clearMenus
+Syntax: clearMenus
+Purpose: Clears the aMen, gMen, and lMen menus in the Max patch and resets current selections.
+
+29. reportArchitectureRows
+Syntax: reportArchitectureRows
+Purpose: Emits one row per line in layer-group-line order for direct Max routing.
+Emits: architecture_rows_begin, then architecture_row layerId groupId lineId layerVisible groupVisible lineVisible, then architecture_rows_end rowCount.
+
 Important usage notes:
 1. targetType must be layer, group, or line.
 2. Layer ids are a1, a2, a3...
 3. Group ids are g1, g2, g3...
 4. For line visibility commands, pass a numeric line id.
+5. User must assign a pathName before saving or loading pools and views.
+   The pathName is used as the storage folder for all pool and view files.
+6. User must assign a poolId before saving or loading views. 
+   The poolId is used to link view files to a specific pool.
+7. User must assign a viewId before saving or loading views. 
+   The viewId is used to identify a specific view file for a given pool.
 */
 
 "use strict";
@@ -232,6 +248,23 @@ function readTextFile(fullPath) {
   return content;
 }
 
+function writeTextFileChunked(fullPath, contentText) {
+  const file = new File(fullPath, "write", "TEXT");
+  if (!file || !file.isopen) {
+    return false;
+  }
+
+  const text = String(contentText || "");
+  const chunkSize = 8192;
+
+  for (let i = 0; i < text.length; i += chunkSize) {
+    file.writestring(text.slice(i, i + chunkSize));
+  }
+
+  file.close();
+  return true;
+}
+
 function cloneJsonSafe(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -292,8 +325,8 @@ function buildRandomPoolFromValues(lineCount, randomValues) {
     point_count: pointCount,
     random_count: randomCount,
     random_values: randomValues,
-    coordinates: coordinates,
-    attributes: attributes
+    coordinates,
+    attributes
   };
 }
 
@@ -990,6 +1023,24 @@ function clearNamedMenu(objectName) {
   return sendNamedObjectMessage(objectName, "clear");
 }
 
+function clearAllMenus() {
+  const clearedA = clearNamedMenu("aMen");
+  const clearedG = clearNamedMenu("gMen");
+  const clearedL = clearNamedMenu("lMen");
+
+  if (!clearedA) {
+    log("clearAllMenus: could not reach aMen");
+  }
+  if (!clearedG) {
+    log("clearAllMenus: could not reach gMen");
+  }
+  if (!clearedL) {
+    log("clearAllMenus: could not reach lMen");
+  }
+
+  return clearedA && clearedG && clearedL;
+}
+
 function appendNamedMenuItem(objectName, itemValue) {
   return sendNamedObjectMessage(objectName, "append", itemValue);
 }
@@ -1431,6 +1482,51 @@ function architecture() {
   outlet(0, "architecture", layerCount, groupCount, lineCount);
 }
 
+function reportArchitectureRows() {
+  if (!hierarchy || !Array.isArray(hierarchy.layers) || !Array.isArray(hierarchy.groups)) {
+    log("reportArchitectureRows requires generated data");
+    return;
+  }
+
+  let rowCount = 0;
+  outlet(0, "architecture_rows_begin");
+
+  for (let i = 0; i < hierarchy.layers.length; i += 1) {
+    const layer = hierarchy.layers[i];
+    const groupIds = Array.isArray(layer.group_ids) ? layer.group_ids : [];
+    const layerNumber = parseInt(String(layer.layer_id || "").replace(/^a/i, ""), 10);
+
+    for (let j = 0; j < groupIds.length; j += 1) {
+      const group = getHierarchyGroupById(groupIds[j]);
+      if (!group || !Array.isArray(group.line_ids)) {
+        continue;
+      }
+
+      const groupNumber = parseInt(String(group.group_id || "").replace(/^g/i, ""), 10);
+
+      for (let k = 0; k < group.line_ids.length; k += 1) {
+        const lineId = group.line_ids[k];
+        const line = getLineById(lineId);
+
+        outlet(
+          0,
+          "architecture_row",
+          layerNumber,
+          groupNumber,
+          lineId,
+          layer.visible ? 1 : 0,
+          group.visible ? 1 : 0,
+          line && line.visible !== false ? 1 : 0
+        );
+
+        rowCount += 1;
+      }
+    }
+  }
+
+  outlet(0, "architecture_rows_end", rowCount);
+}
+
 function set_pathName(nameValue) {
   const resolvedName = String(nameValue || "").trim();
 
@@ -1805,14 +1901,11 @@ function save_index() {
 
   const indexPath = joinPath(targetPath, "pools_index.json");
   const serialized = JSON.stringify(indexPayload, null, 2);
-  const file = new File(indexPath, "write", "TEXT");
-  if (!file || !file.isopen) {
+  const didWrite = writeTextFileChunked(indexPath, serialized);
+  if (!didWrite) {
     log("save_index could not open file: " + indexPath);
     return;
   }
-
-  file.writestring(serialized);
-  file.close();
 
   loadedIndexData = indexPayload;
   loadedIndexPath = indexPath;
@@ -2058,14 +2151,11 @@ function register_view(viewId, fullViewFilePath) {
   indexPayload.saved_at = new Date().toISOString();
 
   const serialized = JSON.stringify(indexPayload, null, 2);
-  const file = new File(indexPath, "write", "TEXT");
-  if (!file || !file.isopen) {
+  const didWrite = writeTextFileChunked(indexPath, serialized);
+  if (!didWrite) {
     log("register_view could not open index file: " + indexPath);
     return;
   }
-
-  file.writestring(serialized);
-  file.close();
 
   loadedIndexData = indexPayload;
   loadedIndexPath = indexPath;
@@ -2141,14 +2231,11 @@ function unregister_view(viewId) {
   indexPayload.saved_at = new Date().toISOString();
 
   const serialized = JSON.stringify(indexPayload, null, 2);
-  const file = new File(indexPath, "write", "TEXT");
-  if (!file || !file.isopen) {
+  const didWrite = writeTextFileChunked(indexPath, serialized);
+  if (!didWrite) {
     log("unregister_view could not open index file: " + indexPath);
     return;
   }
-
-  file.writestring(serialized);
-  file.close();
 
   loadedIndexData = indexPayload;
   loadedIndexPath = indexPath;
@@ -2189,15 +2276,11 @@ function save_randomPool() {
   };
 
   const serialized = JSON.stringify(payload, null, 2);
-  const file = new File(fullPath, "write", "TEXT");
-
-  if (!file || !file.isopen) {
+  const didWrite = writeTextFileChunked(fullPath, serialized);
+  if (!didWrite) {
     log("save_randomPool could not open file: " + fullPath);
     return;
   }
-
-  file.writestring(serialized);
-  file.close();
 
   currentPoolId = payload.pool_id;
 
@@ -2301,14 +2384,11 @@ function save_view(viewId) {
   };
 
   const serialized = JSON.stringify(payload, null, 2);
-  const file = new File(fullPath, "write", "TEXT");
-  if (!file || !file.isopen) {
+  const didWrite = writeTextFileChunked(fullPath, serialized);
+  if (!didWrite) {
     log("save_view could not open file: " + fullPath);
     return;
   }
-
-  file.writestring(serialized);
-  file.close();
 
   outlet(0, "view_saved", fullPath, payload.view_id, payload.pool_id);
 }
@@ -2430,6 +2510,8 @@ function load_view(fullFilePath) {
 }
 
 function reportHierarchy() {
+  //emits the current hierarchy to the outlet for external use (e.g., menu building) in blocks.
+  //for streaming large hierarchies, this is more efficient than sending the entire hierarchy as a single JSON object.
   if (!hierarchy) {
     log("reportHierarchy requires generated data");
     return;
@@ -2597,6 +2679,17 @@ function resetHierarchyRanges() {
 
 function refreshMenus() {
   emitLayerMenu();
+}
+
+function clearMenus() {
+  clearAllMenus();
+
+  selectedLayerId = null;
+  selectedGroupId = null;
+  selectedLineId = null;
+  emitCurrentSelection();
+
+  outlet(0, "menus_cleared");
 }
 
 function generate(numLines) {
