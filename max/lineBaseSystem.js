@@ -131,6 +131,14 @@ Syntax: reportArchitectureRows
 Purpose: Emits one row per line in layer-group-line order for direct Max routing.
 Emits: architecture_rows_begin, then architecture_row layerId groupId lineId layerVisible groupVisible lineVisible, then architecture_rows_end rowCount.
 
+30. reshuffleLineColors
+Syntax: reshuffleLineColors
+Purpose: Randomly reassigns line colors only while keeping line geometry, hierarchy, and line order unchanged.
+
+31. reshuffleLineWidths
+Syntax: reshuffleLineWidths
+Purpose: Randomly reassigns line widths only while keeping line geometry, hierarchy, and line order unchanged.
+
 Important usage notes:
 1. targetType must be layer, group, or line.
 2. Layer ids are a1, a2, a3...
@@ -316,7 +324,7 @@ function buildRandomPoolFromValues(lineCount, randomValues) {
     attributes.a.push(mapToRange(randomValues[cursor], 0.25, 1.0));
     cursor += 1;
 
-    attributes.line_width.push(mapToRange(randomValues[cursor], 0.01, 0.04));
+    attributes.line_width.push(mapToRange(randomValues[cursor], 0.005, 10.5)); //original was 0.01 to 0.04, but changed to 0.005 to 0.5 for more variety
     cursor += 1;
   }
 
@@ -443,6 +451,40 @@ function isValidLoadedViewPayload(payload) {
     return false;
   }
 
+  if (typeof payload.colors_by_line_id !== "undefined") {
+    if (!payload.colors_by_line_id || typeof payload.colors_by_line_id !== "object") {
+      return false;
+    }
+
+    const colorKeys = Object.keys(payload.colors_by_line_id);
+    for (let i = 0; i < colorKeys.length; i += 1) {
+      const value = payload.colors_by_line_id[colorKeys[i]];
+      if (
+        !Array.isArray(value) ||
+        value.length !== 4 ||
+        !isFinite(Number(value[0])) ||
+        !isFinite(Number(value[1])) ||
+        !isFinite(Number(value[2])) ||
+        !isFinite(Number(value[3]))
+      ) {
+        return false;
+      }
+    }
+  }
+
+  if (typeof payload.line_width_by_line_id !== "undefined") {
+    if (!payload.line_width_by_line_id || typeof payload.line_width_by_line_id !== "object") {
+      return false;
+    }
+
+    const widthKeys = Object.keys(payload.line_width_by_line_id);
+    for (let i = 0; i < widthKeys.length; i += 1) {
+      if (!isFinite(Number(payload.line_width_by_line_id[widthKeys[i]]))) {
+        return false;
+      }
+    }
+  }
+
   return true;
 }
 
@@ -548,6 +590,79 @@ function captureVisibilityState() {
   }
 
   return visibilityState;
+}
+
+function captureColorState() {
+  const colorsByLineId = {};
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const color = Array.isArray(line.color) ? line.color : [];
+
+    if (color.length === 4) {
+      colorsByLineId[String(line.id)] = [
+        Number(color[0]),
+        Number(color[1]),
+        Number(color[2]),
+        Number(color[3])
+      ];
+    }
+  }
+
+  return colorsByLineId;
+}
+
+function applyColorState(colorsByLineId) {
+  if (!colorsByLineId || typeof colorsByLineId !== "object") {
+    return;
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const savedColor = colorsByLineId[String(line.id)];
+
+    if (
+      Array.isArray(savedColor) &&
+      savedColor.length === 4 &&
+      isFinite(Number(savedColor[0])) &&
+      isFinite(Number(savedColor[1])) &&
+      isFinite(Number(savedColor[2])) &&
+      isFinite(Number(savedColor[3]))
+    ) {
+      line.color = [
+        Number(savedColor[0]),
+        Number(savedColor[1]),
+        Number(savedColor[2]),
+        Number(savedColor[3])
+      ];
+    }
+  }
+}
+
+function captureLineWidthState() {
+  const widthsByLineId = {};
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    widthsByLineId[String(line.id)] = Number(line.line_width);
+  }
+
+  return widthsByLineId;
+}
+
+function applyLineWidthState(widthsByLineId) {
+  if (!widthsByLineId || typeof widthsByLineId !== "object") {
+    return;
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const savedWidth = Number(widthsByLineId[String(line.id)]);
+
+    if (isFinite(savedWidth)) {
+      line.line_width = savedWidth;
+    }
+  }
 }
 
 function mapToRange(value, min, max) {
@@ -2376,6 +2491,8 @@ function save_view(viewId) {
     hierarchy: cloneJsonSafe(hierarchy),
     hierarchy_ranges: cloneJsonSafe(hierarchyRangeConfig),
     visibility: captureVisibilityState(),
+    colors_by_line_id: captureColorState(),
+    line_width_by_line_id: captureLineWidthState(),
     selection: {
       layer_id: selectedLayerId,
       group_id: selectedGroupId,
@@ -2491,6 +2608,14 @@ function load_view(fullFilePath) {
   applyHierarchyLineOrder();
   applyVisibilityState(parsed.visibility);
 
+  if (parsed.colors_by_line_id && typeof parsed.colors_by_line_id === "object") {
+    applyColorState(parsed.colors_by_line_id);
+  }
+
+  if (parsed.line_width_by_line_id && typeof parsed.line_width_by_line_id === "object") {
+    applyLineWidthState(parsed.line_width_by_line_id);
+  }
+
   emitLayerMenu();
 
   if (parsed.selection && parsed.selection.layer_id) {
@@ -2591,6 +2716,57 @@ function reshuffle() {
 
   shufflePointOrder(pointOrder);
   rebuildSystemFromCurrentState();
+  emitRenderCommands();
+}
+
+function reshuffleLineColors() {
+  if (!lines || lines.length === 0) {
+    log("reshuffleLineColors requires generated data");
+    return;
+  }
+
+  const colorPool = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const color = Array.isArray(lines[i].color) ? lines[i].color.slice() : [1, 1, 1, 1];
+    colorPool.push(color);
+  }
+
+  for (let i = colorPool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const temp = colorPool[i];
+    colorPool[i] = colorPool[j];
+    colorPool[j] = temp;
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    lines[i].color = colorPool[i];
+  }
+
+  emitRenderCommands();
+}
+
+function reshuffleLineWidths() {
+  if (!lines || lines.length === 0) {
+    log("reshuffleLineWidths requires generated data");
+    return;
+  }
+
+  const widthPool = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    widthPool.push(Number(lines[i].line_width));
+  }
+
+  for (let i = widthPool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const temp = widthPool[i];
+    widthPool[i] = widthPool[j];
+    widthPool[j] = temp;
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    lines[i].line_width = widthPool[i];
+  }
+
   emitRenderCommands();
 }
 
