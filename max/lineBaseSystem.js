@@ -3497,6 +3497,7 @@ function resetGroupTransform() {
 }
 
 function getGroupTransform() {
+  log("getGroupTransform");
   const group = getSelectedGroupForTransformCommands();
   if (!group) {
     return;
