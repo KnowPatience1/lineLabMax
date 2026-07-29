@@ -159,3 +159,378 @@ Here, “Visibility Strategy” could be:
 That would let the same LineLab project produce very different visual results simply by changing the visibility strategy, without altering the underlying geometry.
 
 Given your work with thousands of intersecting lines, I think that separation could become one of LineLab’s strengths. Visibility and occlusion don’t have to be fixed properties of the renderer—they can become creative parameters in their own right.
+
+Next I can provide a strict command dictionary and exact JSON schema block text (field-by-field) ready to paste into your dev notes before coding.
+
+Perfect. Here is a strict, paste-ready spec for the new transform feature.
+
+Transform Feature Spec v1
+
+1. Scope
+1. Layer and Group transforms are mutable View state.
+2. Each Layer and Group supports position, rotation, scale in 3D.
+3. Transforms must be saveable in save_view and restored in load_view.
+4. Max UI controls target the current Layer and current Group selection.
+
+2. Fixed conventions for v1
+1. Units:
+Rotation values are degrees.
+2. Transform order:
+Scale -> Rotate -> Translate.
+3. Rotation order:
+Z -> Y -> X.
+4. Composition order:
+Group transform first, then Layer transform.
+5. Pivot:
+World origin (0,0,0).
+6. Scale constraints:
+All scale components must be finite and strictly greater than 0.
+
+3. Runtime state model
+1. layerTransformsById:
+Map keyed by layer_id.
+2. groupTransformsById:
+Map keyed by group_id.
+3. Transform object shape for both:
+position: [x, y, z]
+rotation: [rx, ry, rz]
+scale: [sx, sy, sz]
+4. Identity transform:
+position [0,0,0], rotation [0,0,0], scale [1,1,1]
+
+4. Required command dictionary
+1. setLayerPosition x y z
+Purpose: set position of selectedLayerId.
+2. setLayerRotation x y z
+Purpose: set rotation of selectedLayerId (degrees).
+3. setLayerScale x y z
+Purpose: set scale of selectedLayerId.
+4. setLayerTransform px py pz rx ry rz sx sy sz
+Purpose: set full transform of selectedLayerId.
+5. resetLayerTransform
+Purpose: reset selectedLayerId to identity.
+6. getLayerTransform
+Purpose: emit selected layer transform row.
+
+7. setGroupPosition x y z
+Purpose: set position of selectedGroupId.
+8. setGroupRotation x y z
+Purpose: set rotation of selectedGroupId (degrees).
+9. setGroupScale x y z
+Purpose: set scale of selectedGroupId.
+10. setGroupTransform px py pz rx ry rz sx sy sz
+Purpose: set full transform of selectedGroupId.
+11. resetGroupTransform
+Purpose: reset selectedGroupId to identity.
+12. getGroupTransform
+Purpose: emit selected group transform row.
+
+13. reportTransforms
+Purpose: stream all layer/group transforms as table rows.
+14. resetAllTransforms
+Purpose: reset every layer and group transform to identity.
+
+5. Command behavior contract
+1. Preconditions:
+Hierarchy must exist for all transform commands.
+2. Target resolution:
+Layer commands require selectedLayerId.
+Group commands require selectedGroupId.
+3. Validation:
+Reject NaN/Infinity.
+Reject non-positive scale values.
+4. Side effects:
+Update state, rerender, emit confirmation message.
+5. Errors:
+Log clear reason and do not partially mutate state.
+
+6. Outlet message signatures
+1. Single target reports:
+layer_transform layerId px py pz rx ry rz sx sy sz
+group_transform layerId groupId px py pz rx ry rz sx sy sz
+
+2. Stream report for table building:
+transforms_begin layerCount groupCount
+layer_transform_row layerId px py pz rx ry rz sx sy sz
+group_transform_row layerId groupId px py pz rx ry rz sx sy sz
+transforms_end rowCount
+
+3. Command acknowledgements:
+transform_set targetType targetId
+transform_reset targetType targetId
+transforms_reset_all
+
+4. Error convention:
+Use existing log() pattern and no partial output rows on failure.
+
+7. View JSON schema additions
+Add these fields to view payload in lineBaseSystem.js:
+
+1. transform_version
+Type: integer
+Required in new saves: yes
+Load behavior: if missing, treat as 0/legacy.
+
+2. layer_transforms_by_id
+Type: object
+Key: layer_id string (example a1)
+Value object:
+position: number[3]
+rotation: number[3]
+scale: number[3]
+
+3. group_transforms_by_id
+Type: object
+Key: group_id string (example g7)
+Value object:
+layer_id: string
+position: number[3]
+rotation: number[3]
+scale: number[3]
+
+8. Save/load integration requirements
+1. save_view must include:
+transform_version
+layer_transforms_by_id
+group_transforms_by_id
+2. load_view must:
+Validate transform fields when present.
+Fallback to identity for missing fields.
+Reconcile IDs against loaded hierarchy.
+Ignore stale IDs not present in hierarchy.
+Initialize missing IDs to identity.
+3. Backward compatibility:
+Old views without transform fields must still load successfully.
+
+9. Validation rules for isValidLoadedViewPayload
+1. transform_version:
+If present, must be finite integer >= 1.
+2. layer_transforms_by_id:
+If present, must be object.
+Each key value must include position/rotation/scale arrays of length 3 with finite numbers.
+Scale values must be > 0.
+3. group_transforms_by_id:
+Same checks as layer transforms plus finite layer_id string.
+4. Unknown extra fields:
+Allowed.
+
+10. Geometry/render pipeline requirements
+1. Do not mutate original line base coordinates.
+2. Compute transformed endpoint positions during render from base coordinates.
+3. For each endpoint:
+Apply Group SRT (with ZYX rotation), then Layer SRT (with ZYX rotation).
+4. Keep visibility/color/width logic unchanged.
+
+11. Hierarchy lifecycle rules
+1. On hierarchy rebuild:
+Reconcile transform maps with current layer/group IDs.
+Preserve existing transforms where IDs still exist.
+Create identity transforms for new IDs.
+Drop stale IDs.
+2. On resetHierarchyRanges/buildHierarchy/reshuffle/setForm/rebuild_from_loaded_pool:
+Transform state remains part of current View state and should persist unless ID reconciliation removes stale entries.
+
+12. Header documentation additions
+Add command list entries for all new transform commands in lineBaseSystem.js, following existing numbering/style.
+
+13. Minimal acceptance checklist
+1. Set layer/group transform updates rendering immediately.
+2. reportTransforms emits deterministic table stream.
+3. save_view writes transform payload.
+4. load_view restores transform payload exactly.
+5. Legacy views still load.
+6. Scale validation blocks zero/negative values.
+7. Rebuild paths preserve transform state by ID.
+
+If you want, next I can convert this into a compact implementation checklist ordered by edit location in lineBaseSystem.js so coding can proceed in one pass.
+
+Implementation checklist, ordered by edit location in lineBaseSystem.js, before coding:
+
+1. Lock conventions first (no code yet)
+1. Confirm rotation units, order, transform composition, pivot, and scale constraints.
+2. Confirm command names and outlet message names exactly so Max patch wiring stays stable.
+
+2. Header command block at top of lineBaseSystem.js
+1. Add new public command entries for all transform setters/getters/resets/reports.
+2. Add syntax lines for each command.
+3. Add short purpose text for each command.
+4. Add usage notes about selected layer/group prerequisites and scale > 0 constraint.
+
+3. Globals and default state near existing globals in lineBaseSystem.js
+1. Add transform state maps:
+layerTransformsById, groupTransformsById.
+2. Add identity transform helper data.
+3. Add small utility helpers:
+createIdentityTransform, cloneTransform, isValidTransformTriple, sanitizeTransform.
+
+4. Validation helpers area in lineBaseSystem.js
+1. Extend view payload validation to allow and validate:
+transform_version, layer_transforms_by_id, group_transforms_by_id.
+2. Keep these fields optional for backward compatibility.
+3. Enforce finite values and scale > 0 when fields are present.
+
+5. Hierarchy construction/rebuild section in lineBaseSystem.js
+1. After layer/group creation, reconcile transform maps by current ids.
+2. Preserve existing transforms for surviving ids.
+3. Initialize missing ids to identity.
+4. Drop stale ids that are no longer in hierarchy.
+5. Ensure this reconciliation runs on every path that rebuilds hierarchy.
+
+6. Coordinate/geometry pipeline section in lineBaseSystem.js
+1. Add math helpers for SRT and Euler rotation.
+2. Add endpoint transform function that applies:
+Group transform then Layer transform.
+3. Do not mutate base line coordinates.
+4. Compute transformed endpoints at render time from base coordinates.
+
+7. Render function area in lineBaseSystem.js
+1. Update render path to use transformed endpoints.
+2. Keep visibility logic unchanged.
+3. Keep color and width behavior unchanged.
+4. Keep line order logic unchanged.
+
+8. Command function section in lineBaseSystem.js
+1. Add layer commands:
+setLayerPosition, setLayerRotation, setLayerScale, setLayerTransform, resetLayerTransform, getLayerTransform.
+2. Add group commands:
+setGroupPosition, setGroupRotation, setGroupScale, setGroupTransform, resetGroupTransform, getGroupTransform.
+3. Add bulk/report commands:
+reportTransforms, resetAllTransforms.
+4. For all setters:
+validate input, require active selection, update state, rerender, emit acknowledgement.
+5. For all getters/reports:
+emit deterministic row format suitable for Max table routing.
+
+9. Save path in save_view area of lineBaseSystem.js
+1. Add transform_version to saved payload.
+2. Add layer_transforms_by_id and group_transforms_by_id.
+3. Ensure payload remains JSON-safe and stable.
+
+10. Load path in load_view area of lineBaseSystem.js
+1. Parse and validate transform payload blocks.
+2. Apply legacy fallback to identity if fields are missing.
+3. Reconcile loaded transforms against actual loaded hierarchy ids.
+4. Apply transforms before final render call.
+
+11. Output/reporting consistency in lineBaseSystem.js
+1. Add single-target output messages:
+layer_transform, group_transform.
+2. Add table stream:
+transforms_begin, layer_transform_row, group_transform_row, transforms_end.
+3. Keep naming style consistent with existing hierarchy and architecture stream conventions.
+
+12. Non-functional checks before merge
+1. Run syntax check.
+2. Smoke test command flow in Max:
+select layer/group, set transform, verify rerender.
+3. Save a view, reload, verify transforms restore exactly.
+4. Load an old view file without transform fields, verify no failure.
+5. Rebuild hierarchy paths and verify transforms persist by id where valid.
+
+13. Final acceptance checklist
+1. Layer and group transforms both work.
+2. All transform commands are documented in header.
+3. Transform state is persisted and restorable in views.
+4. Max can consume transform rows as table data.
+5. Existing features remain unchanged (visibility, colors, widths, architecture, reportHierarchy).
+
+If you want, next step I can turn this into a one-pass edit map with exact insertion points by function name, so coding can start without backtracking...
+___
+If you want, next I can provide a Max-side routing map for the new transform messages so you can wire UI controls quickly.
+
+Perfect. Here is a practical Max routing map for the new transform messages from lineBaseSystem.js.
+
+**1. Main Receive Router**
+Use one top-level route object for transform-related outputs:
+
+route transforms_begin layer_transform_row group_transform_row transforms_end layer_transform group_transform transform_set transform_reset transforms_reset_all
+
+This gives you:
+1. Table stream messages.
+2. Single target query responses.
+3. Command acknowledgements.
+
+**2. Table Stream Wiring (for reportTransforms)**
+Expected message shapes:
+1. transforms_begin layerCount groupCount
+2. layer_transform_row layerId px py pz rx ry rz sx sy sz
+3. group_transform_row layerId groupId px py pz rx ry rz sx sy sz
+4. transforms_end rowCount
+
+Recommended split:
+1. route layer_transform_row group_transform_row
+2. layer rows -> unpack s f f f f f f f f f
+3. group rows -> unpack s s f f f f f f f f f
+
+Use these two branches to fill:
+1. coll (indexed rows), or
+2. jit.cellblock (table UI).
+
+**3. Single-Target Query Wiring**
+From getLayerTransform and getGroupTransform:
+
+1. layer_transform layerId px py pz rx ry rz sx sy sz
+2. group_transform layerId groupId px py pz rx ry rz sx sy sz
+
+Recommended:
+1. route layer_transform group_transform
+2. layer branch -> unpack s f f f f f f f f f
+3. group branch -> unpack s s f f f f f f f f f
+
+Send outputs directly to numeric UI controls for live sync.
+
+**4. Command Acknowledgement Wiring**
+From set/reset commands:
+
+1. transform_set targetType targetId
+2. transform_reset targetType targetId
+3. transforms_reset_all
+
+Recommended:
+1. route transform_set transform_reset transforms_reset_all
+2. transform_set -> unpack s s (type, id) -> status display
+3. transform_reset -> unpack s s -> status display
+4. transforms_reset_all -> bang/status
+
+**5. UI-to-JS Send Map (controls to commands)**
+Layer controls:
+1. 3 floats -> prepend setLayerPosition
+2. 3 floats -> prepend setLayerRotation
+3. 3 floats -> prepend setLayerScale
+4. 9 floats -> prepend setLayerTransform
+5. button -> message getLayerTransform
+6. button -> message resetLayerTransform
+
+Group controls:
+1. 3 floats -> prepend setGroupPosition
+2. 3 floats -> prepend setGroupRotation
+3. 3 floats -> prepend setGroupScale
+4. 9 floats -> prepend setGroupTransform
+5. button -> message getGroupTransform
+6. button -> message resetGroupTransform
+
+Global:
+1. button -> message reportTransforms
+2. button -> message resetAllTransforms
+
+**6. Row Format for Table Columns**
+Use fixed column order so downstream patching is stable:
+
+1. layer rows:
+rowType, layerId, px, py, pz, rx, ry, rz, sx, sy, sz
+
+2. group rows:
+rowType, layerId, groupId, px, py, pz, rx, ry, rz, sx, sy, sz
+
+Tip:
+Prefix rowType yourself in Max (for example L or G) before writing to one shared table.
+
+**7. Minimal Test Sequence**
+1. Generate data.
+2. Select a layer and a group.
+3. Send setLayerPosition and setGroupRotation.
+4. Call getLayerTransform and getGroupTransform, verify returned values.
+5. Call reportTransforms, verify begin/rows/end counts.
+6. Save view, reload view, call reportTransforms again, verify same transform values.
+
+If you want, I can give you a concrete jit.cellblock patch recipe next (exact setcell message pattern and row indexing strategy).

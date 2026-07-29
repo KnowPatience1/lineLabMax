@@ -139,6 +139,62 @@ Purpose: Randomly reassigns line colors only while keeping line geometry, hierar
 Syntax: reshuffleLineWidths
 Purpose: Randomly reassigns line widths only while keeping line geometry, hierarchy, and line order unchanged.
 
+32. setLayerPosition x y z
+Syntax: setLayerPosition 0.0 0.0 0.0
+Purpose: Sets position transform for the currently selected layer.
+
+33. setLayerRotation x y z
+Syntax: setLayerRotation 0 30 0
+Purpose: Sets rotation transform (degrees) for the currently selected layer.
+
+34. setLayerScale x y z
+Syntax: setLayerScale 1 1 1
+Purpose: Sets scale transform for the currently selected layer.
+
+35. setLayerTransform px py pz rx ry rz sx sy sz
+Syntax: setLayerTransform 0 0 0 0 0 0 1 1 1
+Purpose: Sets full transform for the currently selected layer.
+
+36. resetLayerTransform
+Syntax: resetLayerTransform
+Purpose: Resets currently selected layer transform to identity.
+
+37. getLayerTransform
+Syntax: getLayerTransform
+Purpose: Emits the currently selected layer transform.
+
+38. setGroupPosition x y z
+Syntax: setGroupPosition 0.0 0.0 0.0
+Purpose: Sets position transform for the currently selected group.
+
+39. setGroupRotation x y z
+Syntax: setGroupRotation 0 0 45
+Purpose: Sets rotation transform (degrees) for the currently selected group.
+
+40. setGroupScale x y z
+Syntax: setGroupScale 1 1 1
+Purpose: Sets scale transform for the currently selected group.
+
+41. setGroupTransform px py pz rx ry rz sx sy sz
+Syntax: setGroupTransform 0 0 0 0 0 0 1 1 1
+Purpose: Sets full transform for the currently selected group.
+
+42. resetGroupTransform
+Syntax: resetGroupTransform
+Purpose: Resets currently selected group transform to identity.
+
+43. getGroupTransform
+Syntax: getGroupTransform
+Purpose: Emits the currently selected group transform.
+
+44. reportTransforms
+Syntax: reportTransforms
+Purpose: Emits all layer/group transforms in a table-style stream.
+
+45. resetAllTransforms
+Syntax: resetAllTransforms
+Purpose: Resets all current layer/group transforms to identity.
+
 Important usage notes:
 1. targetType must be layer, group, or line.
 2. Layer ids are a1, a2, a3...
@@ -150,6 +206,7 @@ Important usage notes:
    The poolId is used to link view files to a specific pool.
 7. User must assign a viewId before saving or loading views. 
    The viewId is used to identify a specific view file for a given pool.
+8. Scale values for transform commands must be positive numbers.
 */
 
 "use strict";
@@ -182,6 +239,8 @@ let pathName = "unset";
 let currentPoolId = null;
 let loadedIndexData = null;
 let loadedIndexPath = "";
+let layerTransformsById = {};
+let groupTransformsById = {};
 // declare a cache object for named objects. This will be used to store references to Max objects by name for faster access.
 const namedObjectCache = {};
 // declare a configuration object for hierarchy ranges. This will hold the min and max values for layer count, groups per layer, and lines per group.
@@ -414,6 +473,48 @@ function isValidPointOrderForPool(order, pointCount) {
   return true;
 }
 
+function isValidTransformVector3(values, positiveOnly) {
+  if (!Array.isArray(values) || values.length !== 3) {
+    return false;
+  }
+
+  for (let i = 0; i < 3; i += 1) {
+    const numeric = Number(values[i]);
+    if (!isFinite(numeric)) {
+      return false;
+    }
+    if (positiveOnly && numeric <= 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isValidTransformEntry(entry, requireLayerId) {
+  if (!entry || typeof entry !== "object") {
+    return false;
+  }
+
+  if (requireLayerId && (typeof entry.layer_id !== "string" || entry.layer_id.length === 0)) {
+    return false;
+  }
+
+  if (!isValidTransformVector3(entry.position, false)) {
+    return false;
+  }
+
+  if (!isValidTransformVector3(entry.rotation, false)) {
+    return false;
+  }
+
+  if (!isValidTransformVector3(entry.scale, true)) {
+    return false;
+  }
+
+  return true;
+}
+
 function isValidLoadedViewPayload(payload) {
   if (!payload || typeof payload !== "object") {
     return false;
@@ -480,6 +581,41 @@ function isValidLoadedViewPayload(payload) {
     const widthKeys = Object.keys(payload.line_width_by_line_id);
     for (let i = 0; i < widthKeys.length; i += 1) {
       if (!isFinite(Number(payload.line_width_by_line_id[widthKeys[i]]))) {
+        return false;
+      }
+    }
+  }
+
+  if (typeof payload.transform_version !== "undefined") {
+    const transformVersion = Number(payload.transform_version);
+    if (!isFinite(transformVersion) || Math.floor(transformVersion) !== transformVersion || transformVersion < 1) {
+      return false;
+    }
+  }
+
+  if (typeof payload.layer_transforms_by_id !== "undefined") {
+    if (!payload.layer_transforms_by_id || typeof payload.layer_transforms_by_id !== "object") {
+      return false;
+    }
+
+    const layerTransformKeys = Object.keys(payload.layer_transforms_by_id);
+    for (let i = 0; i < layerTransformKeys.length; i += 1) {
+      const key = layerTransformKeys[i];
+      if (!isValidTransformEntry(payload.layer_transforms_by_id[key], false)) {
+        return false;
+      }
+    }
+  }
+
+  if (typeof payload.group_transforms_by_id !== "undefined") {
+    if (!payload.group_transforms_by_id || typeof payload.group_transforms_by_id !== "object") {
+      return false;
+    }
+
+    const groupTransformKeys = Object.keys(payload.group_transforms_by_id);
+    for (let i = 0; i < groupTransformKeys.length; i += 1) {
+      const key = groupTransformKeys[i];
+      if (!isValidTransformEntry(payload.group_transforms_by_id[key], true)) {
         return false;
       }
     }
@@ -663,6 +799,274 @@ function applyLineWidthState(widthsByLineId) {
       line.line_width = savedWidth;
     }
   }
+}
+
+function createIdentityTransform() {
+  return {
+    position: [0, 0, 0],
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1]
+  };
+}
+
+function cloneTransform(transform) {
+  return {
+    position: [
+      Number(transform.position[0]),
+      Number(transform.position[1]),
+      Number(transform.position[2])
+    ],
+    rotation: [
+      Number(transform.rotation[0]),
+      Number(transform.rotation[1]),
+      Number(transform.rotation[2])
+    ],
+    scale: [
+      Number(transform.scale[0]),
+      Number(transform.scale[1]),
+      Number(transform.scale[2])
+    ]
+  };
+}
+
+function normalizeTransform(transform, fallbackLayerId) {
+  const identity = createIdentityTransform();
+  const source = transform && typeof transform === "object" ? transform : identity;
+
+  const position = isValidTransformVector3(source.position, false)
+    ? [Number(source.position[0]), Number(source.position[1]), Number(source.position[2])]
+    : identity.position.slice();
+
+  const rotation = isValidTransformVector3(source.rotation, false)
+    ? [Number(source.rotation[0]), Number(source.rotation[1]), Number(source.rotation[2])]
+    : identity.rotation.slice();
+
+  const scale = isValidTransformVector3(source.scale, true)
+    ? [Number(source.scale[0]), Number(source.scale[1]), Number(source.scale[2])]
+    : identity.scale.slice();
+
+  const normalized = {
+    position,
+    rotation,
+    scale
+  };
+
+  if (typeof fallbackLayerId !== "undefined") {
+    normalized.layer_id = typeof source.layer_id === "string" && source.layer_id.length > 0
+      ? source.layer_id
+      : fallbackLayerId;
+  }
+
+  return normalized;
+}
+
+function ensureLayerTransform(layerId) {
+  const key = String(layerId || "");
+  if (key.length === 0) {
+    return null;
+  }
+
+  if (!layerTransformsById[key]) {
+    layerTransformsById[key] = createIdentityTransform();
+  }
+
+  layerTransformsById[key] = normalizeTransform(layerTransformsById[key]);
+  return layerTransformsById[key];
+}
+
+function ensureGroupTransform(groupId, layerId) {
+  const key = String(groupId || "");
+  if (key.length === 0) {
+    return null;
+  }
+
+  if (!groupTransformsById[key]) {
+    groupTransformsById[key] = createIdentityTransform();
+  }
+
+  groupTransformsById[key] = normalizeTransform(groupTransformsById[key], layerId);
+  groupTransformsById[key].layer_id = layerId;
+  return groupTransformsById[key];
+}
+
+function reconcileTransformState() {
+  if (!hierarchy || !Array.isArray(hierarchy.layers) || !Array.isArray(hierarchy.groups)) {
+    layerTransformsById = {};
+    groupTransformsById = {};
+    return;
+  }
+
+  const nextLayerTransforms = {};
+  const nextGroupTransforms = {};
+
+  for (let i = 0; i < hierarchy.layers.length; i += 1) {
+    const layer = hierarchy.layers[i];
+    if (!layer || typeof layer.layer_id !== "string") {
+      continue;
+    }
+
+    const layerId = layer.layer_id;
+    nextLayerTransforms[layerId] = normalizeTransform(layerTransformsById[layerId]);
+  }
+
+  for (let i = 0; i < hierarchy.groups.length; i += 1) {
+    const group = hierarchy.groups[i];
+    if (!group || typeof group.group_id !== "string") {
+      continue;
+    }
+
+    const groupId = group.group_id;
+    const layerId = typeof group.layer_id === "string" ? group.layer_id : "";
+    nextGroupTransforms[groupId] = normalizeTransform(groupTransformsById[groupId], layerId);
+    nextGroupTransforms[groupId].layer_id = layerId;
+  }
+
+  layerTransformsById = nextLayerTransforms;
+  groupTransformsById = nextGroupTransforms;
+}
+
+function captureLayerTransformState() {
+  const output = {};
+  const keys = Object.keys(layerTransformsById || {});
+
+  for (let i = 0; i < keys.length; i += 1) {
+    const key = keys[i];
+    output[key] = cloneTransform(normalizeTransform(layerTransformsById[key]));
+  }
+
+  return output;
+}
+
+function captureGroupTransformState() {
+  const output = {};
+  const keys = Object.keys(groupTransformsById || {});
+
+  for (let i = 0; i < keys.length; i += 1) {
+    const key = keys[i];
+    const source = groupTransformsById[key] || createIdentityTransform();
+    const layerId = typeof source.layer_id === "string" ? source.layer_id : "";
+    const normalized = normalizeTransform(source, layerId);
+
+    output[key] = {
+      layer_id: normalized.layer_id,
+      position: normalized.position.slice(),
+      rotation: normalized.rotation.slice(),
+      scale: normalized.scale.slice()
+    };
+  }
+
+  return output;
+}
+
+function applyLayerTransformState(stateById) {
+  if (!stateById || typeof stateById !== "object") {
+    return;
+  }
+
+  const keys = Object.keys(stateById);
+  for (let i = 0; i < keys.length; i += 1) {
+    const layerId = keys[i];
+    if (!layerTransformsById[layerId]) {
+      continue;
+    }
+
+    if (isValidTransformEntry(stateById[layerId], false)) {
+      layerTransformsById[layerId] = normalizeTransform(stateById[layerId]);
+    }
+  }
+}
+
+function applyGroupTransformState(stateById) {
+  if (!stateById || typeof stateById !== "object") {
+    return;
+  }
+
+  const keys = Object.keys(stateById);
+  for (let i = 0; i < keys.length; i += 1) {
+    const groupId = keys[i];
+    if (!groupTransformsById[groupId]) {
+      continue;
+    }
+
+    if (isValidTransformEntry(stateById[groupId], true)) {
+      const source = stateById[groupId];
+      const normalized = normalizeTransform(source, source.layer_id);
+      normalized.layer_id = groupTransformsById[groupId].layer_id;
+      groupTransformsById[groupId] = normalized;
+    }
+  }
+}
+
+function degreesToRadians(degrees) {
+  return Number(degrees) * (Math.PI / 180);
+}
+
+function applyTransformToPoint(point, transform) {
+  if (!Array.isArray(point) || point.length !== 3 || !transform) {
+    return point;
+  }
+
+  let x = Number(point[0]) * Number(transform.scale[0]);
+  let y = Number(point[1]) * Number(transform.scale[1]);
+  let z = Number(point[2]) * Number(transform.scale[2]);
+
+  const rz = degreesToRadians(transform.rotation[2]);
+  const cosZ = Math.cos(rz);
+  const sinZ = Math.sin(rz);
+  const xz = x * cosZ - y * sinZ;
+  const yz = x * sinZ + y * cosZ;
+  x = xz;
+  y = yz;
+
+  const ry = degreesToRadians(transform.rotation[1]);
+  const cosY = Math.cos(ry);
+  const sinY = Math.sin(ry);
+  const xy = x * cosY + z * sinY;
+  const zy = -x * sinY + z * cosY;
+  x = xy;
+  z = zy;
+
+  const rx = degreesToRadians(transform.rotation[0]);
+  const cosX = Math.cos(rx);
+  const sinX = Math.sin(rx);
+  const yx = y * cosX - z * sinX;
+  const zx = y * sinX + z * cosX;
+  y = yx;
+  z = zx;
+
+  return [
+    x + Number(transform.position[0]),
+    y + Number(transform.position[1]),
+    z + Number(transform.position[2])
+  ];
+}
+
+function transformedLineEndpoint(line, point) {
+  if (!line || !Array.isArray(point) || point.length !== 3) {
+    return point;
+  }
+
+  let transformed = point.slice();
+
+  const group = getHierarchyGroupById(line.group_id);
+  const groupTransform = group && groupTransformsById[group.group_id]
+    ? normalizeTransform(groupTransformsById[group.group_id], group.layer_id)
+    : null;
+  if (groupTransform) {
+    transformed = applyTransformToPoint(transformed, groupTransform);
+  }
+
+  const layerId = group && typeof group.layer_id === "string"
+    ? group.layer_id
+    : line.layer_id;
+  const layerTransform = layerId && layerTransformsById[layerId]
+    ? normalizeTransform(layerTransformsById[layerId])
+    : null;
+  if (layerTransform) {
+    transformed = applyTransformToPoint(transformed, layerTransform);
+  }
+
+  return transformed;
 }
 
 function mapToRange(value, min, max) {
@@ -868,6 +1272,8 @@ function buildLinesFromPool(pool, definitions) {
 
     lines.push({
       id: definition.id,
+      base_start_coords: startCoords.slice(),
+      base_end_coords: endCoords.slice(),
       start_coords: startCoords,
       end_coords: endCoords,
       color: [
@@ -1339,6 +1745,7 @@ function emitLayerMenu() {
 function buildHierarchyFromCurrentLines() {
   if (!lines || lines.length === 0) {
     hierarchy = null;
+    reconcileTransformState();
     emitLayerMenu();
     architecture();
     return;
@@ -1397,6 +1804,8 @@ function buildHierarchyFromCurrentLines() {
     },
     ordered_line_ids: orderedLineIds
   };
+
+  reconcileTransformState();
 
   emitLayerMenu();
   architecture();
@@ -1578,10 +1987,15 @@ function emitRenderCommands() {
       continue;
     }
 
+    const baseStart = Array.isArray(line.base_start_coords) ? line.base_start_coords : line.start_coords;
+    const baseEnd = Array.isArray(line.base_end_coords) ? line.base_end_coords : line.end_coords;
+    const drawStart = transformedLineEndpoint(line, baseStart);
+    const drawEnd = transformedLineEndpoint(line, baseEnd);
+
     outlet(0, "sketch", "glcolor", line.color[0], line.color[1], line.color[2], line.color[3]);
     outlet(0, "sketch", "gllinewidth", sketchWidth(line.line_width));
-    outlet(0, "sketch", "moveto", line.start_coords[0], line.start_coords[1], line.start_coords[2]);
-    outlet(0, "sketch", "lineto", line.end_coords[0], line.end_coords[1], line.end_coords[2]);
+    outlet(0, "sketch", "moveto", drawStart[0], drawStart[1], drawStart[2]);
+    outlet(0, "sketch", "lineto", drawEnd[0], drawEnd[1], drawEnd[2]);
   }
 
   outlet(0, "sketch", "draw");
@@ -2483,6 +2897,7 @@ function save_view(viewId) {
   const payload = {
     type: "lineBaseSystem.view",
     version: 1,
+    transform_version: 1,
     view_id: resolvedViewId,
     pool_id: currentPoolId,
     saved_at: new Date().toISOString(),
@@ -2493,6 +2908,8 @@ function save_view(viewId) {
     visibility: captureVisibilityState(),
     colors_by_line_id: captureColorState(),
     line_width_by_line_id: captureLineWidthState(),
+    layer_transforms_by_id: captureLayerTransformState(),
+    group_transforms_by_id: captureGroupTransformState(),
     selection: {
       layer_id: selectedLayerId,
       group_id: selectedGroupId,
@@ -2603,6 +3020,16 @@ function load_view(fullFilePath) {
         }
       }
     }
+  }
+
+  reconcileTransformState();
+
+  if (parsed.layer_transforms_by_id && typeof parsed.layer_transforms_by_id === "object") {
+    applyLayerTransformState(parsed.layer_transforms_by_id);
+  }
+
+  if (parsed.group_transforms_by_id && typeof parsed.group_transforms_by_id === "object") {
+    applyGroupTransformState(parsed.group_transforms_by_id);
   }
 
   applyHierarchyLineOrder();
@@ -2768,6 +3195,401 @@ function reshuffleLineWidths() {
   }
 
   emitRenderCommands();
+}
+
+function parseTransformNumber(value) {
+  const numeric = Number(value);
+  return isFinite(numeric) ? numeric : null;
+}
+
+function getSelectedLayerForTransformCommands() {
+  if (!hierarchy || !Array.isArray(hierarchy.layers) || hierarchy.layers.length === 0) {
+    log("transform command requires generated data");
+    return null;
+  }
+
+  if (!selectedLayerId) {
+    log("transform command requires selected layer");
+    return null;
+  }
+
+  const layer = getHierarchyLayerById(selectedLayerId);
+  if (!layer) {
+    log("transform command unknown selected layer " + selectedLayerId);
+    return null;
+  }
+
+  return layer;
+}
+
+function getSelectedGroupForTransformCommands() {
+  if (!hierarchy || !Array.isArray(hierarchy.groups) || hierarchy.groups.length === 0) {
+    log("transform command requires generated data");
+    return null;
+  }
+
+  if (!selectedGroupId) {
+    log("transform command requires selected group");
+    return null;
+  }
+
+  const group = getHierarchyGroupById(selectedGroupId);
+  if (!group) {
+    log("transform command unknown selected group " + selectedGroupId);
+    return null;
+  }
+
+  return group;
+}
+
+function emitLayerTransformRow(layerId) {
+  const transform = ensureLayerTransform(layerId);
+  if (!transform) {
+    return;
+  }
+
+  outlet(
+    0,
+    "layer_transform",
+    layerId,
+    transform.position[0],
+    transform.position[1],
+    transform.position[2],
+    transform.rotation[0],
+    transform.rotation[1],
+    transform.rotation[2],
+    transform.scale[0],
+    transform.scale[1],
+    transform.scale[2]
+  );
+}
+
+function emitGroupTransformRow(groupId, layerId) {
+  const transform = ensureGroupTransform(groupId, layerId);
+  if (!transform) {
+    return;
+  }
+
+  outlet(
+    0,
+    "group_transform",
+    layerId,
+    groupId,
+    transform.position[0],
+    transform.position[1],
+    transform.position[2],
+    transform.rotation[0],
+    transform.rotation[1],
+    transform.rotation[2],
+    transform.scale[0],
+    transform.scale[1],
+    transform.scale[2]
+  );
+}
+
+function setLayerPosition(x, y, z) {
+  const layer = getSelectedLayerForTransformCommands();
+  if (!layer) {
+    return;
+  }
+
+  const px = parseTransformNumber(x);
+  const py = parseTransformNumber(y);
+  const pz = parseTransformNumber(z);
+  if (px === null || py === null || pz === null) {
+    log("setLayerPosition requires finite numeric values");
+    return;
+  }
+
+  const transform = ensureLayerTransform(layer.layer_id);
+  transform.position = [px, py, pz];
+  emitRenderCommands();
+  outlet(0, "transform_set", "layer", layer.layer_id);
+}
+
+function setLayerRotation(x, y, z) {
+  const layer = getSelectedLayerForTransformCommands();
+  if (!layer) {
+    return;
+  }
+
+  const rx = parseTransformNumber(x);
+  const ry = parseTransformNumber(y);
+  const rz = parseTransformNumber(z);
+  if (rx === null || ry === null || rz === null) {
+    log("setLayerRotation requires finite numeric values");
+    return;
+  }
+
+  const transform = ensureLayerTransform(layer.layer_id);
+  transform.rotation = [rx, ry, rz];
+  emitRenderCommands();
+  outlet(0, "transform_set", "layer", layer.layer_id);
+}
+
+function setLayerScale(x, y, z) {
+  const layer = getSelectedLayerForTransformCommands();
+  if (!layer) {
+    return;
+  }
+
+  const sx = parseTransformNumber(x);
+  const sy = parseTransformNumber(y);
+  const sz = parseTransformNumber(z);
+  if (sx === null || sy === null || sz === null || sx <= 0 || sy <= 0 || sz <= 0) {
+    log("setLayerScale requires positive numeric values");
+    return;
+  }
+
+  const transform = ensureLayerTransform(layer.layer_id);
+  transform.scale = [sx, sy, sz];
+  emitRenderCommands();
+  outlet(0, "transform_set", "layer", layer.layer_id);
+}
+
+function setLayerTransform(px, py, pz, rx, ry, rz, sx, sy, sz) {
+  const layer = getSelectedLayerForTransformCommands();
+  if (!layer) {
+    return;
+  }
+
+  const position = [parseTransformNumber(px), parseTransformNumber(py), parseTransformNumber(pz)];
+  const rotation = [parseTransformNumber(rx), parseTransformNumber(ry), parseTransformNumber(rz)];
+  const scale = [parseTransformNumber(sx), parseTransformNumber(sy), parseTransformNumber(sz)];
+
+  if (
+    position[0] === null || position[1] === null || position[2] === null ||
+    rotation[0] === null || rotation[1] === null || rotation[2] === null ||
+    scale[0] === null || scale[1] === null || scale[2] === null ||
+    scale[0] <= 0 || scale[1] <= 0 || scale[2] <= 0
+  ) {
+    log("setLayerTransform requires finite position/rotation and positive scale values");
+    return;
+  }
+
+  const transform = ensureLayerTransform(layer.layer_id);
+  transform.position = position;
+  transform.rotation = rotation;
+  transform.scale = scale;
+  emitRenderCommands();
+  outlet(0, "transform_set", "layer", layer.layer_id);
+}
+
+function resetLayerTransform() {
+  const layer = getSelectedLayerForTransformCommands();
+  if (!layer) {
+    return;
+  }
+
+  layerTransformsById[layer.layer_id] = createIdentityTransform();
+  emitRenderCommands();
+  outlet(0, "transform_reset", "layer", layer.layer_id);
+}
+
+function getLayerTransform() {
+  const layer = getSelectedLayerForTransformCommands();
+  if (!layer) {
+    return;
+  }
+
+  emitLayerTransformRow(layer.layer_id);
+}
+
+function setGroupPosition(x, y, z) {
+  const group = getSelectedGroupForTransformCommands();
+  if (!group) {
+    return;
+  }
+
+  const px = parseTransformNumber(x);
+  const py = parseTransformNumber(y);
+  const pz = parseTransformNumber(z);
+  if (px === null || py === null || pz === null) {
+    log("setGroupPosition requires finite numeric values");
+    return;
+  }
+
+  const transform = ensureGroupTransform(group.group_id, group.layer_id);
+  transform.position = [px, py, pz];
+  emitRenderCommands();
+  outlet(0, "transform_set", "group", group.group_id);
+}
+
+function setGroupRotation(x, y, z) {
+  const group = getSelectedGroupForTransformCommands();
+  if (!group) {
+    return;
+  }
+
+  const rx = parseTransformNumber(x);
+  const ry = parseTransformNumber(y);
+  const rz = parseTransformNumber(z);
+  if (rx === null || ry === null || rz === null) {
+    log("setGroupRotation requires finite numeric values");
+    return;
+  }
+
+  const transform = ensureGroupTransform(group.group_id, group.layer_id);
+  transform.rotation = [rx, ry, rz];
+  emitRenderCommands();
+  outlet(0, "transform_set", "group", group.group_id);
+}
+
+function setGroupScale(x, y, z) {
+  const group = getSelectedGroupForTransformCommands();
+  if (!group) {
+    return;
+  }
+
+  const sx = parseTransformNumber(x);
+  const sy = parseTransformNumber(y);
+  const sz = parseTransformNumber(z);
+  if (sx === null || sy === null || sz === null || sx <= 0 || sy <= 0 || sz <= 0) {
+    log("setGroupScale requires positive numeric values");
+    return;
+  }
+
+  const transform = ensureGroupTransform(group.group_id, group.layer_id);
+  transform.scale = [sx, sy, sz];
+  emitRenderCommands();
+  outlet(0, "transform_set", "group", group.group_id);
+}
+
+function setGroupTransform(px, py, pz, rx, ry, rz, sx, sy, sz) {
+  const group = getSelectedGroupForTransformCommands();
+  if (!group) {
+    return;
+  }
+
+  const position = [parseTransformNumber(px), parseTransformNumber(py), parseTransformNumber(pz)];
+  const rotation = [parseTransformNumber(rx), parseTransformNumber(ry), parseTransformNumber(rz)];
+  const scale = [parseTransformNumber(sx), parseTransformNumber(sy), parseTransformNumber(sz)];
+
+  if (
+    position[0] === null || position[1] === null || position[2] === null ||
+    rotation[0] === null || rotation[1] === null || rotation[2] === null ||
+    scale[0] === null || scale[1] === null || scale[2] === null ||
+    scale[0] <= 0 || scale[1] <= 0 || scale[2] <= 0
+  ) {
+    log("setGroupTransform requires finite position/rotation and positive scale values");
+    return;
+  }
+
+  const transform = ensureGroupTransform(group.group_id, group.layer_id);
+  transform.position = position;
+  transform.rotation = rotation;
+  transform.scale = scale;
+  emitRenderCommands();
+  outlet(0, "transform_set", "group", group.group_id);
+}
+
+function resetGroupTransform() {
+  const group = getSelectedGroupForTransformCommands();
+  if (!group) {
+    return;
+  }
+
+  const identity = createIdentityTransform();
+  identity.layer_id = group.layer_id;
+  groupTransformsById[group.group_id] = identity;
+  emitRenderCommands();
+  outlet(0, "transform_reset", "group", group.group_id);
+}
+
+function getGroupTransform() {
+  const group = getSelectedGroupForTransformCommands();
+  if (!group) {
+    return;
+  }
+
+  emitGroupTransformRow(group.group_id, group.layer_id);
+}
+
+function reportTransforms() {
+  if (!hierarchy || !Array.isArray(hierarchy.layers) || !Array.isArray(hierarchy.groups)) {
+    log("reportTransforms requires generated data");
+    return;
+  }
+
+  reconcileTransformState();
+
+  const layerCount = hierarchy.layers.length;
+  const groupCount = hierarchy.groups.length;
+  let rowCount = 0;
+
+  outlet(0, "transforms_begin", layerCount, groupCount);
+
+  for (let i = 0; i < hierarchy.layers.length; i += 1) {
+    const layer = hierarchy.layers[i];
+    const transform = ensureLayerTransform(layer.layer_id);
+    if (!transform) {
+      continue;
+    }
+
+    outlet(
+      0,
+      "layer_transform_row",
+      layer.layer_id,
+      transform.position[0],
+      transform.position[1],
+      transform.position[2],
+      transform.rotation[0],
+      transform.rotation[1],
+      transform.rotation[2],
+      transform.scale[0],
+      transform.scale[1],
+      transform.scale[2]
+    );
+    rowCount += 1;
+  }
+
+  for (let i = 0; i < hierarchy.groups.length; i += 1) {
+    const group = hierarchy.groups[i];
+    const transform = ensureGroupTransform(group.group_id, group.layer_id);
+    if (!transform) {
+      continue;
+    }
+
+    outlet(
+      0,
+      "group_transform_row",
+      group.layer_id,
+      group.group_id,
+      transform.position[0],
+      transform.position[1],
+      transform.position[2],
+      transform.rotation[0],
+      transform.rotation[1],
+      transform.rotation[2],
+      transform.scale[0],
+      transform.scale[1],
+      transform.scale[2]
+    );
+    rowCount += 1;
+  }
+
+  outlet(0, "transforms_end", rowCount);
+}
+
+function resetAllTransforms() {
+  if (!hierarchy || !Array.isArray(hierarchy.layers) || !Array.isArray(hierarchy.groups)) {
+    log("resetAllTransforms requires generated data");
+    return;
+  }
+
+  for (let i = 0; i < hierarchy.layers.length; i += 1) {
+    layerTransformsById[hierarchy.layers[i].layer_id] = createIdentityTransform();
+  }
+
+  for (let i = 0; i < hierarchy.groups.length; i += 1) {
+    const group = hierarchy.groups[i];
+    const identity = createIdentityTransform();
+    identity.layer_id = group.layer_id;
+    groupTransformsById[group.group_id] = identity;
+  }
+
+  emitRenderCommands();
+  outlet(0, "transforms_reset_all");
 }
 
 function setForm(formName) {
