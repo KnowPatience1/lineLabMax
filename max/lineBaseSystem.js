@@ -160,8 +160,8 @@ outlets = 1;
 const RANDOMS_PER_POINT = 9;
 
 const DEFAULT_LAYER_COUNT_RANGE = { min: 1, max: 4 };
-const DEFAULT_GROUPS_PER_LAYER_RANGE = { min: 1, max: 6 };
-const DEFAULT_LINES_PER_GROUP_RANGE = { min: 1, max: 200 };
+const DEFAULT_GROUPS_PER_LAYER_RANGE = { min: 1, max: 5 };
+const DEFAULT_LINES_PER_GROUP_RANGE = { min: 1, max: 1000 };
 
 // declare variable for randomPool. This will hold the frozen random values and coordinates for line generation.
 let randomPool = null;
@@ -321,7 +321,7 @@ function buildRandomPoolFromValues(lineCount, randomValues) {
     cursor += 1;
     attributes.b.push(randomValues[cursor]);
     cursor += 1;
-    attributes.a.push(mapToRange(randomValues[cursor], 0.25, 1.0));
+    attributes.a.push(mapToRange(randomValues[cursor], 0.1, 1.0)); //original was 0.25 to 1.0, but changed to 0.1 to 1.0 for more variety
     cursor += 1;
 
     attributes.line_width.push(mapToRange(randomValues[cursor], 0.005, 10.5)); //original was 0.01 to 0.04, but changed to 0.005 to 0.5 for more variety

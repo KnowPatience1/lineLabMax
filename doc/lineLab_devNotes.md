@@ -18,3 +18,7 @@ Where this happens in code:
 - Cleared on new generate: lineBaseSystem.js
 
 If you prefer stricter behavior, we can remove `set_poolId` and enforce pool context only from save/load operations.
+
+The co-ordinates are originally all numbers between 0 and 1. In order to be used in a form (sphere, cube), they must be massaged into the number space of that form. For example, a cube requires co-ordinates between -1 and +1.They are at this point already no longer part of the original set of random numbers: they are part of the View definition.
+(Cage used very few random numbers in comparison.)
+Are there parallels, in this way of working, to evolution? The way the original rands are immutable, as a basis for the processes which continue on top? Or should I be thinking that the rands are also changing when they become too burdensome?
