@@ -534,3 +534,5 @@ Prefix rowType yourself in Max (for example L or G) before writing to one shared
 6. Save view, reload view, call reportTransforms again, verify same transform values.
 
 If you want, I can give you a concrete jit.cellblock patch recipe next (exact setcell message pattern and row indexing strategy).
+
+control of color in this project must be subtractive, in a View, since I cannot change the original rands.

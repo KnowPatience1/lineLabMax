@@ -206,7 +206,7 @@ Important usage notes:
    The poolId is used to link view files to a specific pool.
 7. User must assign a viewId before saving or loading views. 
    The viewId is used to identify a specific view file for a given pool.
-8. Scale values for transform commands must be positive numbers.
+8. Scale values for transform commands must be non-zero finite numbers.
 */
 
 "use strict";
@@ -483,7 +483,7 @@ function isValidTransformVector3(values, positiveOnly) {
     if (!isFinite(numeric)) {
       return false;
     }
-    if (positiveOnly && numeric <= 0) {
+    if (positiveOnly && numeric === 0) {
       return false;
     }
   }
@@ -3336,8 +3336,8 @@ function setLayerScale(x, y, z) {
   const sx = parseTransformNumber(x);
   const sy = parseTransformNumber(y);
   const sz = parseTransformNumber(z);
-  if (sx === null || sy === null || sz === null || sx <= 0 || sy <= 0 || sz <= 0) {
-    log("setLayerScale requires positive numeric values");
+  if (sx === null || sy === null || sz === null || sx === 0 || sy === 0 || sz === 0) {
+    log("setLayerScale requires non-zero numeric values");
     return;
   }
 
@@ -3361,9 +3361,9 @@ function setLayerTransform(px, py, pz, rx, ry, rz, sx, sy, sz) {
     position[0] === null || position[1] === null || position[2] === null ||
     rotation[0] === null || rotation[1] === null || rotation[2] === null ||
     scale[0] === null || scale[1] === null || scale[2] === null ||
-    scale[0] <= 0 || scale[1] <= 0 || scale[2] <= 0
+    scale[0] === 0 || scale[1] === 0 || scale[2] === 0
   ) {
-    log("setLayerTransform requires finite position/rotation and positive scale values");
+    log("setLayerTransform requires finite position/rotation and non-zero scale values");
     return;
   }
 
@@ -3444,8 +3444,8 @@ function setGroupScale(x, y, z) {
   const sx = parseTransformNumber(x);
   const sy = parseTransformNumber(y);
   const sz = parseTransformNumber(z);
-  if (sx === null || sy === null || sz === null || sx <= 0 || sy <= 0 || sz <= 0) {
-    log("setGroupScale requires positive numeric values");
+  if (sx === null || sy === null || sz === null || sx === 0 || sy === 0 || sz === 0) {
+    log("setGroupScale requires non-zero numeric values");
     return;
   }
 
@@ -3469,9 +3469,9 @@ function setGroupTransform(px, py, pz, rx, ry, rz, sx, sy, sz) {
     position[0] === null || position[1] === null || position[2] === null ||
     rotation[0] === null || rotation[1] === null || rotation[2] === null ||
     scale[0] === null || scale[1] === null || scale[2] === null ||
-    scale[0] <= 0 || scale[1] <= 0 || scale[2] <= 0
+    scale[0] === 0 || scale[1] === 0 || scale[2] === 0
   ) {
-    log("setGroupTransform requires finite position/rotation and positive scale values");
+    log("setGroupTransform requires finite position/rotation and non-zero scale values");
     return;
   }
 
