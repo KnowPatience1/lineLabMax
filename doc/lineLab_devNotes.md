@@ -536,3 +536,303 @@ Prefix rowType yourself in Max (for example L or G) before writing to one shared
 If you want, I can give you a concrete jit.cellblock patch recipe next (exact setcell message pattern and row indexing strategy).
 
 control of color in this project must be subtractive, in a View, since I cannot change the original rands.
+
+Q: Tell me about the different ways of rotating an object in 3-D space: around its own origin, global origin, etc. I'm unclear about terminology and what the differences are.
+
+A: This is one of the fundamental ideas in 3D graphics, and the terminology is often confusing because people use the same words in different ways.
+
+The key idea is that rotation always happens about an axis passing through some point. Changing that point completely changes the result.
+
+Let’s build it up.
+
+⸻
+
+1. Local coordinate system
+
+Every object has its own coordinate system.
+
+Imagine a line generator that creates a cube centred on the origin:
+
+        z
+        │
+        │
+        O──── y
+       /
+      /
+     x
+
+Here the object’s origin is at (0,0,0).
+
+All of its vertices are stored relative to this origin.
+
+⸻
+
+2. World coordinate system
+
+The scene also has its own coordinate system.
+
+World
+        Z
+        │
+        │
+        O──────── Y
+       /
+      /
+     X
+
+Every object is eventually placed into this world.
+
+⸻
+
+3. Rotation about the object’s own origin (Local Rotation)
+
+Suppose the object is translated to
+
+(5,0,0)
+
+Now rotate it around its own Z axis.
+
+before
+          *
+          |
+          |
+      *---O---*
+          |
+          |
+after
+        \   /
+         \ /
+          O
+         / \
+        /   \
+
+Notice:
+
+* the object spins
+* its centre stays at (5,0,0)
+
+This is what most people mean by
+
+rotate the object.
+
+⸻
+
+4. Rotation around the world origin
+
+Now suppose the same object is at
+
+(5,0,0)
+
+Instead of rotating the object, rotate it about the world’s origin.
+
+before
+World Origin
+O--------------------□
+after 90°
+          □
+          |
+          |
+          |
+O---------
+
+The object moves around a circle.
+
+It behaves like a planet orbiting the sun.
+
+The object may not spin at all.
+
+⸻
+
+5. Rotation about an arbitrary point
+
+Suppose you choose
+
+(10,3,-4)
+
+as the centre of rotation.
+
+The object moves in a circle around that point.
+
+That point does not have to be:
+
+* the object’s origin
+* the world’s origin
+
+It can be anywhere.
+
+⸻
+
+6. Rotation about an arbitrary axis
+
+The axis doesn’t have to be X, Y or Z.
+
+It could be
+
+(1,1,1)
+
+or
+
+(0.2,0.8,-0.5)
+
+Any direction is possible.
+
+⸻
+
+7. Local axes vs world axes
+
+This is another source of confusion.
+
+Imagine an aeroplane.
+
+Initially
+
+Local X == World X
+
+Rotate the aeroplane 90°.
+
+Now
+
+Local X
+^
+|
+World X ---->
+
+The object’s axes rotated with it.
+
+So if you now say
+
+rotate around X
+
+you must ask
+
+Which X?
+
+⸻
+
+Local X
+
+Rotate around the aeroplane’s own wing axis.
+
+⸻
+
+World X
+
+Rotate around the world’s fixed X axis.
+
+Very different result.
+
+⸻
+
+8. Order matters
+
+Suppose you do
+
+Rotate X
+then
+Rotate Y
+
+This is not the same as
+
+Rotate Y
+then
+Rotate X
+
+Rotation is not commutative.
+
+This surprises many people.
+
+⸻
+
+9. Blender terminology
+
+Blender generally uses
+
+* Local
+* Global
+* Parent
+* View
+* Normal
+
+for transform orientations.
+
+Local means
+
+object’s own coordinate system
+
+Global means
+
+world’s coordinate system
+
+⸻
+
+10. The transform sequence
+
+Most graphics systems perform
+
+Scale
+↓
+Rotate
+↓
+Translate
+
+often abbreviated
+
+SRT
+
+or
+
+TRS
+
+depending on the API.
+
+Notice something important:
+
+Rotate
+↓
+Translate
+
+means
+
+rotate around the object’s own origin,
+then move it.
+
+Whereas
+
+Translate
+↓
+Rotate
+
+means
+
+move it away from the origin,
+then rotate it around the world’s origin.
+
+The order completely changes the result.
+
+⸻
+
+How this relates to LineLab
+
+Your LineDefinition stores explicit start and end points:
+
+start = (x1,y1,z1)
+end   = (x2,y2,z2)
+
+That means an individual line doesn’t naturally have an origin in the same way that a mesh or cube does. If you want to rotate a single line “about itself,” you first have to define a pivot point, for example:
+
+* its midpoint,
+* its start point,
+* its end point,
+* or any arbitrary point along the line.
+
+For groups or generators, the situation is more natural. A generator can have its own local origin, produce a set of lines around that origin, and then be positioned in the world with an SRT transform. That allows you to create a pattern once and reuse it in different positions, scales, and orientations.
+
+So, for LineLab, I would distinguish these concepts:
+
+Object	Natural pivot
+Line	Chosen pivot (e.g. midpoint or endpoint)
+Group	Group origin
+Generator	Generator origin
+Whole project	World origin
+
+Keeping those separate gives you a flexible model: the same generated geometry can be spun in place, orbited around another point, or instanced multiple times with different transforms, all without modifying the underlying line definitions.
