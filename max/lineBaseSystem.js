@@ -4308,8 +4308,15 @@ function applySort() {
     return;
   }
 
+  const hasActiveAmounts = hasActiveSortAmounts(sortState);
+  sortState.applied = hasActiveAmounts ? 1 : 0;
+
+  if (!hasActiveAmounts) {
+    outlet(0, "sort_applied");
+    return;
+  }
+
   applyCurrentSortStateToLines();
-  sortState.applied = hasActiveSortAmounts(sortState) ? 1 : 0;
   emitRenderCommands();
 
   outlet(0, "sort_applied");
