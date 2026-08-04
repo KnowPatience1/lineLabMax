@@ -9,3 +9,5 @@ lineBaseInForm.maxpat
 lineBaseSystem.maxpat
 doc/testSequenceForSpaceSwitch .md
 rememberTrio.maxpat
+max/main.js
+max/geometry.js

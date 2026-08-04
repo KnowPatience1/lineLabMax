@@ -372,6 +372,16 @@ Sort outlet messages:
 autowatch = 1;
 inlets = 1;
 outlets = 1;
+const lineBaseUtils = require("lineBaseUtils.js");
+const lineBaseValidatorModule = require("lineBaseValidators.js");
+const lineBaseIOModule = require("lineBaseIO.js");
+const lineBaseMenusModule = require("lineBaseMenus.js");
+const lineBaseMenuFlowModule = require("lineBaseMenuFlow.js");
+const lineBaseStateHelpersModule = require("lineBaseStateHelpers.js");
+const lineBaseReportsModule = require("lineBaseReports.js");
+const lineBaseRenderModule = require("lineBaseRender.js");
+const lineBaseTransformMutationsModule = require("lineBaseTransformMutations.js");
+const lineBaseIndexMutationsModule = require("lineBaseIndexMutations.js");
 
 const RANDOMS_PER_POINT = 9;
 
@@ -391,6 +401,13 @@ const SORT_CHANNEL_G = "g";
 const SORT_CHANNEL_B = "b";
 const SORT_CHANNEL_A = "a";
 const SORT_CHANNEL_RGBA = "rgba";
+const lineBaseValidators = lineBaseValidatorModule.createLineBaseValidators({
+  RANDOMS_PER_POINT: RANDOMS_PER_POINT,
+  TRANSFORM_SPACE_LOCAL: TRANSFORM_SPACE_LOCAL,
+  TRANSFORM_SPACE_WORLD: TRANSFORM_SPACE_WORLD,
+  pointCountFromLineCount: pointCountFromLineCount,
+  randomCountFromLineCount: randomCountFromLineCount
+});
 
 // declare variable for randomPool. This will hold the frozen random values and coordinates for line generation.
 let randomPool = null;
@@ -442,97 +459,421 @@ const hierarchyRangeConfig = {
   }
 };
 
+const runtime = {
+  state: {},
+  deps: {
+    emit: function() {
+      return outlet.apply(null, arguments);
+    },
+    postLine: function(message) {
+      return post(message);
+    },
+    getNamedObject: function(objectName) {
+      if (typeof patcher === "object" && patcher && typeof patcher.getnamed === "function") {
+        return patcher.getnamed(objectName);
+      }
+
+      return null;
+    },
+    createFile: function(fullPath, accessMode, fileType) {
+      if (typeof accessMode === "undefined") {
+        return new File(fullPath);
+      }
+
+      return new File(fullPath, accessMode, fileType);
+    },
+    createFolder: function(folderPath) {
+      return new Folder(folderPath);
+    }
+  }
+};
+
+const lineBaseIO = lineBaseIOModule.createLineBaseIO({
+  createFile: function(fullPath, accessMode, fileType) {
+    return runtime.deps.createFile(fullPath, accessMode, fileType);
+  }
+});
+
+const lineBaseMenus = lineBaseMenusModule.createLineBaseMenus({
+  cache: namedObjectCache,
+  getNamedObject: function(objectName) {
+    return runtime.deps.getNamedObject(objectName);
+  },
+  log: function(message) {
+    log(message);
+  }
+});
+
+const lineBaseMenuFlow = lineBaseMenuFlowModule.createLineBaseMenuFlow({
+  emit: function() {
+    return runtime.deps.emit.apply(null, arguments);
+  },
+  log: function(message) {
+    log(message);
+  },
+  getHierarchy: function() {
+    return hierarchy;
+  },
+  getSelectedLayerId: function() {
+    return selectedLayerId;
+  },
+  setSelectedLayerId: function(value) {
+    selectedLayerId = value;
+  },
+  getSelectedGroupId: function() {
+    return selectedGroupId;
+  },
+  setSelectedGroupId: function(value) {
+    selectedGroupId = value;
+  },
+  getSelectedLineId: function() {
+    return selectedLineId;
+  },
+  setSelectedLineId: function(value) {
+    selectedLineId = value;
+  },
+  getHierarchyGroupById: function(groupId) {
+    return getHierarchyGroupById(groupId);
+  },
+  getGroupsForLayer: function(layerId) {
+    return getGroupsForLayer(layerId);
+  },
+  clearNamedMenu: function(objectName) {
+    return clearNamedMenu(objectName);
+  },
+  appendNamedMenuItem: function(objectName, itemValue) {
+    return appendNamedMenuItem(objectName, itemValue);
+  },
+  setNamedMenuSelection: function(objectName, selectionValue) {
+    return setNamedMenuSelection(objectName, selectionValue);
+  }
+});
+
+const lineBaseStateHelpers = lineBaseStateHelpersModule.createLineBaseStateHelpers({
+  getHierarchy: function() {
+    return hierarchy;
+  },
+  getLines: function() {
+    return lines;
+  },
+  setLayerVisible: function(layerId, visible) {
+    setLayerVisible(layerId, visible);
+  },
+  setGroupVisible: function(groupId, visible) {
+    setGroupVisible(groupId, visible);
+  },
+  setLineVisible: function(lineId, visible) {
+    setLineVisible(lineId, visible);
+  },
+  createIdentityTransform: function() {
+    return createIdentityTransform();
+  },
+  cloneTransform: function(transform) {
+    return cloneTransform(transform);
+  },
+  normalizeTransform: function(transform, fallbackLayerId) {
+    return normalizeTransform(transform, fallbackLayerId);
+  },
+  ensureLayerTransformSpace: function(layerId) {
+    return ensureLayerTransformSpace(layerId);
+  },
+  ensureGroupTransformSpace: function(groupId) {
+    return ensureGroupTransformSpace(groupId);
+  },
+  ensureSceneTransform: function() {
+    return ensureSceneTransform();
+  },
+  ensureSceneTransformSpace: function() {
+    return ensureSceneTransformSpace();
+  },
+  isValidTransformEntry: function(entry, requireLayerId) {
+    return isValidTransformEntry(entry, requireLayerId);
+  },
+  isValidSceneTransformSpaceValue: function(value) {
+    return isValidSceneTransformSpaceValue(value);
+  },
+  normalizeSceneTransformSpace: function(value) {
+    return normalizeSceneTransformSpace(value);
+  },
+  getLayerTransformsById: function() {
+    return layerTransformsById;
+  },
+  getLayerTransformSpacesById: function() {
+    return layerTransformSpacesById;
+  },
+  getGroupTransformsById: function() {
+    return groupTransformsById;
+  },
+  getGroupTransformSpacesById: function() {
+    return groupTransformSpacesById;
+  },
+  setSceneTransform: function(value) {
+    sceneTransform = value;
+  }
+});
+
+const lineBaseReports = lineBaseReportsModule.createLineBaseReports({
+  emit: function() {
+    return runtime.deps.emit.apply(null, arguments);
+  },
+  log: function(message) {
+    log(message);
+  },
+  getHierarchy: function() {
+    return hierarchy;
+  },
+  getLines: function() {
+    return lines;
+  },
+  getHierarchyGroupById: function(groupId) {
+    return getHierarchyGroupById(groupId);
+  },
+  getLineById: function(lineId) {
+    return getLineById(lineId);
+  },
+  ensureLayerTransform: function(layerId) {
+    return ensureLayerTransform(layerId);
+  },
+  ensureLayerTransformSpace: function(layerId) {
+    return ensureLayerTransformSpace(layerId);
+  },
+  ensureGroupTransform: function(groupId, layerId) {
+    return ensureGroupTransform(groupId, layerId);
+  },
+  ensureGroupTransformSpace: function(groupId) {
+    return ensureGroupTransformSpace(groupId);
+  },
+  ensureSceneTransform: function() {
+    return ensureSceneTransform();
+  },
+  ensureSceneTransformSpace: function() {
+    return ensureSceneTransformSpace();
+  }
+});
+
+const lineBaseRender = lineBaseRenderModule.createLineBaseRender({
+  emit: function() {
+    return runtime.deps.emit.apply(null, arguments);
+  },
+  getLines: function() {
+    return lines;
+  },
+  computeGroupRenderPivotPoints: function() {
+    return computeGroupRenderPivotPoints();
+  },
+  computeLayerRenderPivotPoints: function(groupPivotsById) {
+    return computeLayerRenderPivotPoints(groupPivotsById);
+  },
+  ensureSceneTransform: function() {
+    return ensureSceneTransform();
+  },
+  ensureSceneTransformSpace: function() {
+    return ensureSceneTransformSpace();
+  },
+  getRenderPivotPoint: function() {
+    return getRenderPivotPoint();
+  },
+  isLineVisibleByHierarchy: function(line) {
+    return isLineVisibleByHierarchy(line);
+  },
+  transformedLineEndpoint: function(line, point, groupPivotsById, layerPivotsById) {
+    return transformedLineEndpoint(line, point, groupPivotsById, layerPivotsById);
+  },
+  applyTransformToPointAroundPivot: function(point, transform, pivot) {
+    return applyTransformToPointAroundPivot(point, transform, pivot);
+  },
+  applyTransformToPoint: function(point, transform) {
+    return applyTransformToPoint(point, transform);
+  },
+  TRANSFORM_SPACE_LOCAL: TRANSFORM_SPACE_LOCAL
+});
+
+const lineBaseTransformMutations = lineBaseTransformMutationsModule.createLineBaseTransformMutations({
+  log: function(message) {
+    log(message);
+  },
+  emit: function() {
+    return runtime.deps.emit.apply(null, arguments);
+  },
+  emitRenderCommands: function() {
+    emitRenderCommands();
+  },
+  getSelectedLayerForTransformCommands: function() {
+    return getSelectedLayerForTransformCommands();
+  },
+  getSelectedGroupForTransformCommands: function() {
+    return getSelectedGroupForTransformCommands();
+  },
+  ensureLayerTransformSpace: function(layerId) {
+    return ensureLayerTransformSpace(layerId);
+  },
+  ensureGroupTransformSpace: function(groupId) {
+    return ensureGroupTransformSpace(groupId);
+  },
+  ensureSceneTransformSpace: function() {
+    return ensureSceneTransformSpace();
+  },
+  ensureLayerTransform: function(layerId) {
+    return ensureLayerTransform(layerId);
+  },
+  ensureGroupTransform: function(groupId, layerId) {
+    return ensureGroupTransform(groupId, layerId);
+  },
+  ensureSceneTransform: function() {
+    return ensureSceneTransform();
+  },
+  isValidSceneTransformSpaceValue: function(mode) {
+    return isValidSceneTransformSpaceValue(mode);
+  },
+  normalizeSceneTransformSpace: function(mode) {
+    return normalizeSceneTransformSpace(mode);
+  },
+  createIdentityTransform: function() {
+    return createIdentityTransform();
+  },
+  getLayerTransformsById: function() {
+    return layerTransformsById;
+  },
+  getLayerTransformSpacesById: function() {
+    return layerTransformSpacesById;
+  },
+  getGroupTransformsById: function() {
+    return groupTransformsById;
+  },
+  getGroupTransformSpacesById: function() {
+    return groupTransformSpacesById;
+  },
+  getHierarchy: function() {
+    return hierarchy;
+  },
+  setSceneTransform: function(value) {
+    sceneTransform = value;
+  },
+  setSceneTransformSpace: function(value) {
+    sceneTransformSpace = value;
+  },
+  getSceneTransformSpace: function() {
+    return sceneTransformSpace;
+  },
+  TRANSFORM_SPACE_LOCAL: TRANSFORM_SPACE_LOCAL
+});
+
+const lineBaseIndexMutations = lineBaseIndexMutationsModule.createLineBaseIndexMutations({
+  log: function(message) {
+    log(message);
+  },
+  emit: function() {
+    return runtime.deps.emit.apply(null, arguments);
+  },
+  createFolder: function(path) {
+    return runtime.deps.createFolder(path);
+  },
+  joinPath: function(folderPath, fileName) {
+    return joinPath(folderPath, fileName);
+  },
+  readTextFile: function(fullPath) {
+    return readTextFile(fullPath);
+  },
+  writeTextFileChunked: function(fullPath, contentText) {
+    return writeTextFileChunked(fullPath, contentText);
+  },
+  isValidLoadedPoolPayload: function(payload) {
+    return isValidLoadedPoolPayload(payload);
+  },
+  isValidLoadedViewPayload: function(payload) {
+    return isValidLoadedViewPayload(payload);
+  },
+  isValidLoadedIndexPayload: function(payload) {
+    return isValidLoadedIndexPayload(payload);
+  },
+  cloneJsonSafe: function(value) {
+    return cloneJsonSafe(value);
+  },
+  getPathName: function() {
+    return pathName;
+  },
+  getLoadedIndexData: function() {
+    return loadedIndexData;
+  },
+  setLoadedIndexData: function(value) {
+    loadedIndexData = value;
+  },
+  getLoadedIndexPath: function() {
+    return loadedIndexPath;
+  },
+  setLoadedIndexPath: function(value) {
+    loadedIndexPath = value;
+  }
+});
+
+function bindRuntimeStateProperty(propertyName, getter, setter) {
+  Object.defineProperty(runtime.state, propertyName, {
+    enumerable: true,
+    configurable: false,
+    get: getter,
+    set: setter
+  });
+}
+
+bindRuntimeStateProperty("randomPool", function() { return randomPool; }, function(value) { randomPool = value; });
+bindRuntimeStateProperty("coordinateOverrides", function() { return coordinateOverrides; }, function(value) { coordinateOverrides = value; });
+bindRuntimeStateProperty("poolOverrides", function() { return poolOverrides; }, function(value) { poolOverrides = value; });
+bindRuntimeStateProperty("sortState", function() { return sortState; }, function(value) { sortState = value; });
+bindRuntimeStateProperty("pointOrder", function() { return pointOrder; }, function(value) { pointOrder = value; });
+bindRuntimeStateProperty("lineDefinitions", function() { return lineDefinitions; }, function(value) { lineDefinitions = value; });
+bindRuntimeStateProperty("lines", function() { return lines; }, function(value) { lines = value; });
+bindRuntimeStateProperty("selectedFormName", function() { return selectedFormName; }, function(value) { selectedFormName = value; });
+bindRuntimeStateProperty("hierarchy", function() { return hierarchy; }, function(value) { hierarchy = value; });
+bindRuntimeStateProperty("selectedLayerId", function() { return selectedLayerId; }, function(value) { selectedLayerId = value; });
+bindRuntimeStateProperty("selectedGroupId", function() { return selectedGroupId; }, function(value) { selectedGroupId = value; });
+bindRuntimeStateProperty("selectedLineId", function() { return selectedLineId; }, function(value) { selectedLineId = value; });
+bindRuntimeStateProperty("pathName", function() { return pathName; }, function(value) { pathName = value; });
+bindRuntimeStateProperty("currentPoolId", function() { return currentPoolId; }, function(value) { currentPoolId = value; });
+bindRuntimeStateProperty("loadedIndexData", function() { return loadedIndexData; }, function(value) { loadedIndexData = value; });
+bindRuntimeStateProperty("loadedIndexPath", function() { return loadedIndexPath; }, function(value) { loadedIndexPath = value; });
+bindRuntimeStateProperty("sceneTransform", function() { return sceneTransform; }, function(value) { sceneTransform = value; });
+bindRuntimeStateProperty("sceneTransformSpace", function() { return sceneTransformSpace; }, function(value) { sceneTransformSpace = value; });
+bindRuntimeStateProperty("layerTransformsById", function() { return layerTransformsById; }, function(value) { layerTransformsById = value; });
+bindRuntimeStateProperty("layerTransformSpacesById", function() { return layerTransformSpacesById; }, function(value) { layerTransformSpacesById = value; });
+bindRuntimeStateProperty("groupTransformsById", function() { return groupTransformsById; }, function(value) { groupTransformsById = value; });
+bindRuntimeStateProperty("groupTransformSpacesById", function() { return groupTransformSpacesById; }, function(value) { groupTransformSpacesById = value; });
+bindRuntimeStateProperty("namedObjectCache", function() { return namedObjectCache; }, function() {});
+bindRuntimeStateProperty("hierarchyRangeConfig", function() { return hierarchyRangeConfig; }, function() {});
+
 function log(msg) {
-  post("[lineBaseSystem] " + msg + "\n");
+  runtime.deps.postLine("[lineBaseSystem] " + msg + "\n");
 }
 
 function twoDigitTime(value) {
-  return value < 10 ? "0" + value : String(value);
+  return lineBaseUtils.twoDigitTime(value);
 }
 
 function currentTimeStampHms() {
-  const now = new Date();
-  const hours = twoDigitTime(now.getHours());
-  const minutes = twoDigitTime(now.getMinutes());
-  const seconds = twoDigitTime(now.getSeconds());
-  return hours + "-" + minutes + "-" + seconds;
+  return lineBaseUtils.currentTimeStampHms();
 }
 
 function currentDateStampYmd() {
-  const now = new Date();
-  const year = String(now.getFullYear());
-  const month = twoDigitTime(now.getMonth() + 1);
-  const day = twoDigitTime(now.getDate());
-  return year + "-" + month + "-" + day;
+  return lineBaseUtils.currentDateStampYmd();
 }
 
 function joinPath(folderPath, fileName) {
-  if (!folderPath || folderPath.length === 0) {
-    return fileName;
-  }
-
-  const lastCharacter = folderPath.charAt(folderPath.length - 1);
-  if (lastCharacter === "/" || lastCharacter === "\\") {
-    return folderPath + fileName;
-  }
-
-  return folderPath + "/" + fileName;
+  return lineBaseIO.joinPath(folderPath, fileName);
 }
 
 function readTextFile(fullPath) {
-  const file = new File(fullPath);
-  if (!file || !file.isopen) {
-    return null;
-  }
-
-  let content = "";
-  const chunkSize = 8192;
-
-  while (file.position < file.eof) {
-    const remaining = file.eof - file.position;
-    const size = remaining > chunkSize ? chunkSize : remaining;
-    content += file.readstring(size);
-  }
-
-  file.close();
-  return content;
+  return lineBaseIO.readTextFile(fullPath);
 }
 
 function writeTextFileChunked(fullPath, contentText) {
-  const file = new File(fullPath, "write", "TEXT");
-  if (!file || !file.isopen) {
-    return false;
-  }
-
-  const text = String(contentText || "");
-  const chunkSize = 8192;
-
-  for (let i = 0; i < text.length; i += chunkSize) {
-    file.writestring(text.slice(i, i + chunkSize));
-  }
-
-  file.close();
-  return true;
+  return lineBaseIO.writeTextFileChunked(fullPath, contentText);
 }
 
 function cloneJsonSafe(value) {
-  return JSON.parse(JSON.stringify(value));
+  return lineBaseUtils.cloneJsonSafe(value);
 }
 
 function poolChecksumFromRandomValues(randomValues) {
-  let hash = 2166136261;
-
-  for (let i = 0; i < randomValues.length; i += 1) {
-    const token = String(randomValues[i]);
-    for (let j = 0; j < token.length; j += 1) {
-      hash ^= token.charCodeAt(j);
-      hash = (hash * 16777619) >>> 0;
-    }
-    hash ^= 124;
-    hash = (hash * 16777619) >>> 0;
-  }
-
-  return ("00000000" + hash.toString(16)).slice(-8);
+  return lineBaseUtils.poolChecksumFromRandomValues(randomValues);
 }
 
 function buildRandomPoolFromValues(lineCount, randomValues) {
@@ -581,134 +922,27 @@ function buildRandomPoolFromValues(lineCount, randomValues) {
 }
 
 function isValidLoadedPoolPayload(payload) {
-  if (!payload || typeof payload !== "object") {
-    return false;
-  }
-
-  if (payload.type !== "lineBaseSystem.pool") {
-    return false;
-  }
-
-  if (!isFinite(Number(payload.line_count)) || !isFinite(Number(payload.point_count)) || !isFinite(Number(payload.random_count))) {
-    return false;
-  }
-
-  if (!Array.isArray(payload.random_values)) {
-    return false;
-  }
-
-  const lineCount = Number(payload.line_count);
-  const expectedPointCount = pointCountFromLineCount(lineCount);
-  const expectedRandomCount = randomCountFromLineCount(lineCount);
-
-  if (Number(payload.randoms_per_point) !== RANDOMS_PER_POINT) {
-    return false;
-  }
-
-  if (Number(payload.point_count) !== expectedPointCount) {
-    return false;
-  }
-
-  if (Number(payload.random_count) !== expectedRandomCount) {
-    return false;
-  }
-
-  if (payload.random_values.length !== expectedRandomCount) {
-    return false;
-  }
-
-  for (let i = 0; i < payload.random_values.length; i += 1) {
-    if (!isFinite(Number(payload.random_values[i]))) {
-      return false;
-    }
-  }
-
-  if (typeof payload.checksum !== "string" || payload.checksum.length === 0) {
-    return false;
-  }
-
-  return true;
+  return lineBaseValidators.isValidLoadedPoolPayload(payload);
 }
 
 function isValidPointOrderForPool(order, pointCount) {
-  if (!Array.isArray(order) || order.length !== pointCount) {
-    return false;
-  }
-
-  const seen = {};
-  for (let i = 0; i < order.length; i += 1) {
-    const value = Number(order[i]);
-    if (!isFinite(value)) {
-      return false;
-    }
-
-    const index = Math.floor(value);
-    if (index !== value || index < 0 || index >= pointCount) {
-      return false;
-    }
-
-    if (seen[index]) {
-      return false;
-    }
-    seen[index] = true;
-  }
-
-  return true;
+  return lineBaseValidators.isValidPointOrderForPool(order, pointCount);
 }
 
 function isValidTransformVector3(values, positiveOnly) {
-  if (!Array.isArray(values) || values.length !== 3) {
-    return false;
-  }
-
-  for (let i = 0; i < 3; i += 1) {
-    const numeric = Number(values[i]);
-    if (!isFinite(numeric)) {
-      return false;
-    }
-    if (positiveOnly && numeric === 0) {
-      return false;
-    }
-  }
-
-  return true;
+  return lineBaseValidators.isValidTransformVector3(values, positiveOnly);
 }
 
 function isValidTransformEntry(entry, requireLayerId) {
-  if (!entry || typeof entry !== "object") {
-    return false;
-  }
-
-  if (requireLayerId && (typeof entry.layer_id !== "string" || entry.layer_id.length === 0)) {
-    return false;
-  }
-
-  if (!isValidTransformVector3(entry.position, false)) {
-    return false;
-  }
-
-  if (!isValidTransformVector3(entry.rotation, false)) {
-    return false;
-  }
-
-  if (!isValidTransformVector3(entry.scale, true)) {
-    return false;
-  }
-
-  return true;
+  return lineBaseValidators.isValidTransformEntry(entry, requireLayerId);
 }
 
 function isValidSceneTransformSpaceValue(value) {
-  const normalized = String(value || "").toLowerCase();
-  return normalized === TRANSFORM_SPACE_LOCAL || normalized === TRANSFORM_SPACE_WORLD;
+  return lineBaseValidators.isValidSceneTransformSpaceValue(value);
 }
 
 function normalizeSceneTransformSpace(value) {
-  const normalized = String(value || "").toLowerCase();
-  if (normalized === TRANSFORM_SPACE_WORLD) {
-    return TRANSFORM_SPACE_WORLD;
-  }
-  return TRANSFORM_SPACE_LOCAL;
+  return lineBaseValidators.normalizeSceneTransformSpace(value);
 }
 
 function ensureSceneTransformSpace() {
@@ -745,269 +979,19 @@ function ensureGroupTransformSpace(groupId) {
 }
 
 function isValidLoadedViewPayload(payload) {
-  if (!payload || typeof payload !== "object") {
-    return false;
-  }
-
-  if (payload.type !== "lineBaseSystem.view") {
-    return false;
-  }
-
-  if (typeof payload.view_id !== "string" || payload.view_id.length === 0) {
-    return false;
-  }
-
-  if (typeof payload.pool_id !== "string" || payload.pool_id.length === 0) {
-    return false;
-  }
-
-  if (payload.form !== "cube" && payload.form !== "sphere") {
-    return false;
-  }
-
-  if (!payload.hierarchy || !Array.isArray(payload.hierarchy.layers) || !Array.isArray(payload.hierarchy.groups) || !Array.isArray(payload.hierarchy.ordered_line_ids)) {
-    return false;
-  }
-
-  if (!payload.hierarchy_ranges || !payload.hierarchy_ranges.layerCount || !payload.hierarchy_ranges.groupsPerLayer || !payload.hierarchy_ranges.linesPerGroup) {
-    return false;
-  }
-
-  if (!payload.visibility || !payload.selection) {
-    return false;
-  }
-
-  if (!Array.isArray(payload.point_order)) {
-    return false;
-  }
-
-  if (typeof payload.colors_by_line_id !== "undefined") {
-    if (!payload.colors_by_line_id || typeof payload.colors_by_line_id !== "object") {
-      return false;
-    }
-
-    const colorKeys = Object.keys(payload.colors_by_line_id);
-    for (let i = 0; i < colorKeys.length; i += 1) {
-      const value = payload.colors_by_line_id[colorKeys[i]];
-      if (
-        !Array.isArray(value) ||
-        value.length !== 4 ||
-        !isFinite(Number(value[0])) ||
-        !isFinite(Number(value[1])) ||
-        !isFinite(Number(value[2])) ||
-        !isFinite(Number(value[3]))
-      ) {
-        return false;
-      }
-    }
-  }
-
-  if (typeof payload.line_width_by_line_id !== "undefined") {
-    if (!payload.line_width_by_line_id || typeof payload.line_width_by_line_id !== "object") {
-      return false;
-    }
-
-    const widthKeys = Object.keys(payload.line_width_by_line_id);
-    for (let i = 0; i < widthKeys.length; i += 1) {
-      if (!isFinite(Number(payload.line_width_by_line_id[widthKeys[i]]))) {
-        return false;
-      }
-    }
-  }
-
-  if (typeof payload.transform_version !== "undefined") {
-    const transformVersion = Number(payload.transform_version);
-    if (!isFinite(transformVersion) || Math.floor(transformVersion) !== transformVersion || transformVersion < 1) {
-      return false;
-    }
-  }
-
-  if (typeof payload.sort_version !== "undefined") {
-    const sortVersion = Number(payload.sort_version);
-    if (!isFinite(sortVersion) || Math.floor(sortVersion) !== sortVersion || sortVersion < 1) {
-      return false;
-    }
-  }
-
-  if (typeof payload.sort_state !== "undefined") {
-    if (!payload.sort_state || typeof payload.sort_state !== "object") {
-      return false;
-    }
-  }
-
-  if (typeof payload.layer_transforms_by_id !== "undefined") {
-    if (!payload.layer_transforms_by_id || typeof payload.layer_transforms_by_id !== "object") {
-      return false;
-    }
-
-    const layerTransformKeys = Object.keys(payload.layer_transforms_by_id);
-    for (let i = 0; i < layerTransformKeys.length; i += 1) {
-      const key = layerTransformKeys[i];
-      if (!isValidTransformEntry(payload.layer_transforms_by_id[key], false)) {
-        return false;
-      }
-    }
-  }
-
-  if (typeof payload.layer_spaces_by_id !== "undefined") {
-    if (!payload.layer_spaces_by_id || typeof payload.layer_spaces_by_id !== "object") {
-      return false;
-    }
-
-    const layerSpaceKeys = Object.keys(payload.layer_spaces_by_id);
-    for (let i = 0; i < layerSpaceKeys.length; i += 1) {
-      const key = layerSpaceKeys[i];
-      if (!isValidSceneTransformSpaceValue(payload.layer_spaces_by_id[key])) {
-        return false;
-      }
-    }
-  }
-
-  if (typeof payload.group_transforms_by_id !== "undefined") {
-    if (!payload.group_transforms_by_id || typeof payload.group_transforms_by_id !== "object") {
-      return false;
-    }
-
-    const groupTransformKeys = Object.keys(payload.group_transforms_by_id);
-    for (let i = 0; i < groupTransformKeys.length; i += 1) {
-      const key = groupTransformKeys[i];
-      if (!isValidTransformEntry(payload.group_transforms_by_id[key], true)) {
-        return false;
-      }
-    }
-  }
-
-  if (typeof payload.group_spaces_by_id !== "undefined") {
-    if (!payload.group_spaces_by_id || typeof payload.group_spaces_by_id !== "object") {
-      return false;
-    }
-
-    const groupSpaceKeys = Object.keys(payload.group_spaces_by_id);
-    for (let i = 0; i < groupSpaceKeys.length; i += 1) {
-      const key = groupSpaceKeys[i];
-      if (!isValidSceneTransformSpaceValue(payload.group_spaces_by_id[key])) {
-        return false;
-      }
-    }
-  }
-
-  if (typeof payload.scene_transform !== "undefined") {
-    if (!isValidTransformEntry(payload.scene_transform, false)) {
-      return false;
-    }
-  }
-
-  if (typeof payload.scene_space !== "undefined") {
-    if (!isValidSceneTransformSpaceValue(payload.scene_space)) {
-      return false;
-    }
-  }
-
-  return true;
+  return lineBaseValidators.isValidLoadedViewPayload(payload);
 }
 
 function isValidLoadedIndexPayload(payload) {
-  if (!payload || typeof payload !== "object") {
-    return false;
-  }
-
-  if (payload.type !== "lineBaseSystem.index") {
-    return false;
-  }
-
-  if (!Array.isArray(payload.pools)) {
-    return false;
-  }
-
-  for (let i = 0; i < payload.pools.length; i += 1) {
-    const pool = payload.pools[i];
-    if (!pool || typeof pool !== "object") {
-      return false;
-    }
-
-    if (typeof pool.pool_id !== "string" || pool.pool_id.length === 0) {
-      return false;
-    }
-
-    if (!Array.isArray(pool.views)) {
-      return false;
-    }
-
-    for (let j = 0; j < pool.views.length; j += 1) {
-      const view = pool.views[j];
-      if (!view || typeof view !== "object") {
-        return false;
-      }
-
-      if (typeof view.view_id !== "string" || view.view_id.length === 0) {
-        return false;
-      }
-    }
-  }
-
-  return true;
+  return lineBaseValidators.isValidLoadedIndexPayload(payload);
 }
 
 function applyVisibilityState(visibilityState) {
-  if (!visibilityState || typeof visibilityState !== "object") {
-    return;
-  }
-
-  if (visibilityState.layers && typeof visibilityState.layers === "object") {
-    const layerKeys = Object.keys(visibilityState.layers);
-    for (let i = 0; i < layerKeys.length; i += 1) {
-      const key = layerKeys[i];
-      setLayerVisible(key, !!visibilityState.layers[key]);
-    }
-  }
-
-  if (visibilityState.groups && typeof visibilityState.groups === "object") {
-    const groupKeys = Object.keys(visibilityState.groups);
-    for (let i = 0; i < groupKeys.length; i += 1) {
-      const key = groupKeys[i];
-      setGroupVisible(key, !!visibilityState.groups[key]);
-    }
-  }
-
-  if (visibilityState.lines && typeof visibilityState.lines === "object") {
-    const lineKeys = Object.keys(visibilityState.lines);
-    for (let i = 0; i < lineKeys.length; i += 1) {
-      const key = lineKeys[i];
-      const lineId = Number(key);
-      if (isFinite(lineId)) {
-        setLineVisible(lineId, !!visibilityState.lines[key]);
-      }
-    }
-  }
+  lineBaseStateHelpers.applyVisibilityState(visibilityState);
 }
 
 function captureVisibilityState() {
-  const visibilityState = {
-    layers: {},
-    groups: {},
-    lines: {}
-  };
-
-  if (hierarchy && Array.isArray(hierarchy.layers)) {
-    for (let i = 0; i < hierarchy.layers.length; i += 1) {
-      const layer = hierarchy.layers[i];
-      visibilityState.layers[layer.layer_id] = layer.visible !== false ? 1 : 0;
-    }
-  }
-
-  if (hierarchy && Array.isArray(hierarchy.groups)) {
-    for (let i = 0; i < hierarchy.groups.length; i += 1) {
-      const group = hierarchy.groups[i];
-      visibilityState.groups[group.group_id] = group.visible !== false ? 1 : 0;
-    }
-  }
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    visibilityState.lines[String(line.id)] = line.visible !== false ? 1 : 0;
-  }
-
-  return visibilityState;
+  return lineBaseStateHelpers.captureVisibilityState();
 }
 
 function captureColorState() {
@@ -1221,153 +1205,47 @@ function reconcileTransformState() {
 }
 
 function captureLayerTransformState() {
-  const output = {};
-  const keys = Object.keys(layerTransformsById || {});
-
-  for (let i = 0; i < keys.length; i += 1) {
-    const key = keys[i];
-    output[key] = cloneTransform(normalizeTransform(layerTransformsById[key]));
-  }
-
-  return output;
+  return lineBaseStateHelpers.captureLayerTransformState();
 }
 
 function captureLayerTransformSpaceState() {
-  const output = {};
-  const keys = Object.keys(layerTransformSpacesById || {});
-
-  for (let i = 0; i < keys.length; i += 1) {
-    const key = keys[i];
-    output[key] = ensureLayerTransformSpace(key);
-  }
-
-  return output;
+  return lineBaseStateHelpers.captureLayerTransformSpaceState();
 }
 
 function captureGroupTransformState() {
-  const output = {};
-  const keys = Object.keys(groupTransformsById || {});
-
-  for (let i = 0; i < keys.length; i += 1) {
-    const key = keys[i];
-    const source = groupTransformsById[key] || createIdentityTransform();
-    const layerId = typeof source.layer_id === "string" ? source.layer_id : "";
-    const normalized = normalizeTransform(source, layerId);
-
-    output[key] = {
-      layer_id: normalized.layer_id,
-      position: normalized.position.slice(),
-      rotation: normalized.rotation.slice(),
-      scale: normalized.scale.slice()
-    };
-  }
-
-  return output;
+  return lineBaseStateHelpers.captureGroupTransformState();
 }
 
 function captureGroupTransformSpaceState() {
-  const output = {};
-  const keys = Object.keys(groupTransformSpacesById || {});
-
-  for (let i = 0; i < keys.length; i += 1) {
-    const key = keys[i];
-    output[key] = ensureGroupTransformSpace(key);
-  }
-
-  return output;
+  return lineBaseStateHelpers.captureGroupTransformSpaceState();
 }
 
 function captureSceneTransformState() {
-  return cloneTransform(ensureSceneTransform());
+  return lineBaseStateHelpers.captureSceneTransformState();
 }
 
 function captureSceneTransformSpaceState() {
-  return ensureSceneTransformSpace();
+  return lineBaseStateHelpers.captureSceneTransformSpaceState();
 }
 
 function applyLayerTransformState(stateById) {
-  if (!stateById || typeof stateById !== "object") {
-    return;
-  }
-
-  const keys = Object.keys(stateById);
-  for (let i = 0; i < keys.length; i += 1) {
-    const layerId = keys[i];
-    if (!layerTransformsById[layerId]) {
-      continue;
-    }
-
-    if (isValidTransformEntry(stateById[layerId], false)) {
-      layerTransformsById[layerId] = normalizeTransform(stateById[layerId]);
-    }
-  }
+  lineBaseStateHelpers.applyLayerTransformState(stateById);
 }
 
 function applyLayerTransformSpaceState(stateById) {
-  if (!stateById || typeof stateById !== "object") {
-    return;
-  }
-
-  const keys = Object.keys(stateById);
-  for (let i = 0; i < keys.length; i += 1) {
-    const layerId = keys[i];
-    if (!layerTransformsById[layerId]) {
-      continue;
-    }
-
-    if (isValidSceneTransformSpaceValue(stateById[layerId])) {
-      layerTransformSpacesById[layerId] = normalizeSceneTransformSpace(stateById[layerId]);
-    }
-  }
+  lineBaseStateHelpers.applyLayerTransformSpaceState(stateById);
 }
 
 function applyGroupTransformState(stateById) {
-  if (!stateById || typeof stateById !== "object") {
-    return;
-  }
-
-  const keys = Object.keys(stateById);
-  for (let i = 0; i < keys.length; i += 1) {
-    const groupId = keys[i];
-    if (!groupTransformsById[groupId]) {
-      continue;
-    }
-
-    if (isValidTransformEntry(stateById[groupId], true)) {
-      const source = stateById[groupId];
-      const normalized = normalizeTransform(source, source.layer_id);
-      normalized.layer_id = groupTransformsById[groupId].layer_id;
-      groupTransformsById[groupId] = normalized;
-    }
-  }
+  lineBaseStateHelpers.applyGroupTransformState(stateById);
 }
 
 function applyGroupTransformSpaceState(stateById) {
-  if (!stateById || typeof stateById !== "object") {
-    return;
-  }
-
-  const keys = Object.keys(stateById);
-  for (let i = 0; i < keys.length; i += 1) {
-    const groupId = keys[i];
-    if (!groupTransformsById[groupId]) {
-      continue;
-    }
-
-    if (isValidSceneTransformSpaceValue(stateById[groupId])) {
-      groupTransformSpacesById[groupId] = normalizeSceneTransformSpace(stateById[groupId]);
-    }
-  }
+  lineBaseStateHelpers.applyGroupTransformSpaceState(stateById);
 }
 
 function applySceneTransformState(state) {
-  if (!state || typeof state !== "object") {
-    return;
-  }
-
-  if (isValidTransformEntry(state, false)) {
-    sceneTransform = normalizeTransform(state);
-  }
+  lineBaseStateHelpers.applySceneTransformState(state);
 }
 
 function degreesToRadians(degrees) {
@@ -1692,7 +1570,7 @@ function transformedLineEndpoint(line, point, groupPivotsById, layerPivotsById) 
 }
 
 function mapToRange(value, min, max) {
-  return min + value * (max - min);
+  return lineBaseUtils.mapToRange(value, min, max);
 }
 
 function createDefaultSortState() {
@@ -1984,40 +1862,27 @@ function applyCurrentSortStateToLines() {
 }
 
 function sketchWidth(lineWidth) {
-  return Math.max(2, Number(lineWidth) * 120);
+  return lineBaseRender.sketchWidth(lineWidth);
 }
 
 function pointCountFromLineCount(lineCount) {
-  return lineCount * 2;
+  return lineBaseUtils.pointCountFromLineCount(lineCount);
 }
 
 function randomCountFromLineCount(lineCount) {
-  return pointCountFromLineCount(lineCount) * RANDOMS_PER_POINT;
+  return lineBaseUtils.randomCountFromLineCount(lineCount, RANDOMS_PER_POINT);
 }
 
 function createRandomValues(count) {
-  const values = [];
-  for (let i = 0; i < count; i += 1) {
-    values.push(Math.random());
-  }
-  return values;
+  return lineBaseUtils.createRandomValues(count);
 }
 
 function createPointOrder(pointCount) {
-  const order = [];
-  for (let i = 0; i < pointCount; i += 1) {
-    order.push(i);
-  }
-  return order;
+  return lineBaseUtils.createPointOrder(pointCount);
 }
 
 function shufflePointOrder(order) {
-  for (let i = order.length - 1; i > 0; i -= 1) {
-    const randomPosition = Math.floor(Math.random() * (i + 1));
-    const swapValue = order[i];
-    order[i] = order[randomPosition];
-    order[randomPosition] = swapValue;
-  }
+  lineBaseUtils.shuffleArrayInPlace(order);
 }
 
 function getActiveCoordinates(pool) {
@@ -2102,33 +1967,11 @@ function verifyPoolIsLocked(pool) {
 }
 
 function randomIntInclusive(minValue, maxValue) {
-  return Math.floor(Math.random() * (maxValue - minValue + 1)) + minValue;
+  return lineBaseUtils.randomIntInclusive(minValue, maxValue);
 }
 
 function sanitizeRange(minValue, maxValue, fallbackMin, fallbackMax) {
-  const parsedMin = parseInt(minValue, 10);
-  const parsedMax = parseInt(maxValue, 10);
-
-  let safeMin = isFinite(parsedMin) ? parsedMin : fallbackMin;
-  let safeMax = isFinite(parsedMax) ? parsedMax : fallbackMax;
-
-  if (safeMin < 1) {
-    safeMin = 1;
-  }
-  if (safeMax < 1) {
-    safeMax = 1;
-  }
-
-  if (safeMin > safeMax) {
-    const temp = safeMin;
-    safeMin = safeMax;
-    safeMax = temp;
-  }
-
-  return {
-    min: safeMin,
-    max: safeMax
-  };
+  return lineBaseUtils.sanitizeRange(minValue, maxValue, fallbackMin, fallbackMax);
 }
 
 function buildRandomPool(lineCount) {
@@ -2445,151 +2288,43 @@ function flattenLineOrderFromLayers(layers, groupsById) {
 }
 
 function getNamedObject(objectName) {
-  if (typeof patcher === "object" && patcher && typeof patcher.getnamed === "function") {
-    return patcher.getnamed(objectName);
-  }
-
-  return null;
+  return lineBaseMenus.getNamedObject(objectName);
 }
 
 function getCachedNamedObject(objectName, forceRefresh) {
-  if (!forceRefresh && namedObjectCache[objectName] && typeof namedObjectCache[objectName].message === "function") {
-    return namedObjectCache[objectName];
-  }
-
-  const namedObject = getNamedObject(objectName);
-  if (namedObject && typeof namedObject.message === "function") {
-    namedObjectCache[objectName] = namedObject;
-    return namedObject;
-  }
-
-  namedObjectCache[objectName] = null;
-  return null;
+  return lineBaseMenus.getCachedNamedObject(objectName, forceRefresh);
 }
 
 function sendNamedObjectMessage(objectName, messageName, value) {
-  let namedObject = getCachedNamedObject(objectName, false);
-
-  if (!namedObject) {
-    return false;
-  }
-
-  function deliver(target) {
-    if (typeof value === "undefined") {
-      target.message(messageName);
-    } else {
-      target.message(messageName, value);
-    }
-  }
-
-  try {
-    deliver(namedObject);
-    return true;
-  } catch (error) {
-    namedObjectCache[objectName] = null;
-  }
-
-  namedObject = getCachedNamedObject(objectName, true);
-
-  if (namedObject && typeof namedObject.message === "function") {
-    try {
-      deliver(namedObject);
-      return true;
-    } catch (error) {
-      namedObjectCache[objectName] = null;
-    }
-  }
-
-  return false;
+  return lineBaseMenus.sendNamedObjectMessage(objectName, messageName, value);
 }
 
 function clearNamedMenu(objectName) {
-  return sendNamedObjectMessage(objectName, "clear");
+  return lineBaseMenus.clearNamedMenu(objectName);
 }
 
 function clearAllMenus() {
-  const clearedA = clearNamedMenu("aMen");
-  const clearedG = clearNamedMenu("gMen");
-  const clearedL = clearNamedMenu("lMen");
-
-  if (!clearedA) {
-    log("clearAllMenus: could not reach aMen");
-  }
-  if (!clearedG) {
-    log("clearAllMenus: could not reach gMen");
-  }
-  if (!clearedL) {
-    log("clearAllMenus: could not reach lMen");
-  }
-
-  return clearedA && clearedG && clearedL;
+  return lineBaseMenus.clearAllMenus();
 }
 
 function appendNamedMenuItem(objectName, itemValue) {
-  return sendNamedObjectMessage(objectName, "append", itemValue);
+  return lineBaseMenus.appendNamedMenuItem(objectName, itemValue);
 }
 
 function setNamedMenuSelection(objectName, selectionValue) {
-  if (selectionValue === null || typeof selectionValue === "undefined") {
-    return false;
-  }
-
-  return sendNamedObjectMessage(objectName, "set", selectionValue);
+  return lineBaseMenus.setNamedMenuSelection(objectName, selectionValue);
 }
 
 function currentSelectionValue(value) {
-  if (value === null || typeof value === "undefined") {
-    return "none";
-  }
-
-  return value;
+  return lineBaseMenuFlow.currentSelectionValue(value);
 }
 
 function emitCurrentSelection() {
-  outlet(0, "current_layer", currentSelectionValue(selectedLayerId));
-  outlet(0, "current_group", currentSelectionValue(selectedGroupId));
-  outlet(0, "current_line", currentSelectionValue(selectedLineId));
+  lineBaseMenuFlow.emitCurrentSelection();
 }
 
 function resolveMenuSelection(selectionValue, values) {
-  if (!values || values.length === 0) {
-    return null;
-  }
-
-  if (typeof selectionValue === "undefined" || selectionValue === null || selectionValue === "") {
-    return values[0];
-  }
-
-  const selectionText = String(selectionValue);
-
-  for (let i = 0; i < values.length; i += 1) {
-    if (values[i] === selectionValue) {
-      return values[i];
-    }
-  }
-
-  for (let i = 0; i < values.length; i += 1) {
-    if (String(values[i]) === selectionText) {
-      return values[i];
-    }
-  }
-
-  const numericValue = Number(selectionValue);
-  const isNumericSelection = isFinite(numericValue);
-
-  if (isNumericSelection) {
-    const oneBasedIndex = Math.floor(numericValue) - 1;
-    if (oneBasedIndex >= 0 && oneBasedIndex < values.length) {
-      return values[oneBasedIndex];
-    }
-
-    const zeroBasedIndex = Math.floor(numericValue);
-    if (zeroBasedIndex >= 0 && zeroBasedIndex < values.length) {
-      return values[zeroBasedIndex];
-    }
-  }
-
-  return values[0];
+  return lineBaseMenuFlow.resolveMenuSelection(selectionValue, values);
 }
 
 function getGroupsForLayer(layerId) {
@@ -2610,99 +2345,15 @@ function getGroupsForLayer(layerId) {
 }
 
 function emitLineMenu() {
-  const couldClearMenu = clearNamedMenu("lMen");
-
-  if (!couldClearMenu) {
-    log("emitLineMenu: could not reach lMen");
-    emitCurrentSelection();
-    return;
-  }
-
-  if (!hierarchy || !selectedGroupId) {
-    selectedLineId = null;
-    emitCurrentSelection();
-    return;
-  }
-
-  const group = getHierarchyGroupById(selectedGroupId);
-  if (!group || !group.line_ids || group.line_ids.length === 0) {
-    selectedLineId = null;
-    emitCurrentSelection();
-    return;
-  }
-
-  for (let i = 0; i < group.line_ids.length; i += 1) {
-    if (!appendNamedMenuItem("lMen", group.line_ids[i])) {
-      log("emitLineMenu: append failed for lMen item " + group.line_ids[i]);
-    }
-  }
-
-  selectedLineId = group.line_ids[0];
-  setNamedMenuSelection("lMen", selectedLineId);
-  emitCurrentSelection();
+  lineBaseMenuFlow.emitLineMenu();
 }
 
 function emitGroupMenu() {
-  const couldClearMenu = clearNamedMenu("gMen");
-
-  if (!couldClearMenu) {
-    log("emitGroupMenu: could not reach gMen");
-    return;
-  }
-
-  if (!hierarchy || !hierarchy.groups || !selectedLayerId) {
-    selectedGroupId = null;
-    emitLineMenu();
-    return;
-  }
-
-  const groupsInLayer = getGroupsForLayer(selectedLayerId);
-  for (let i = 0; i < groupsInLayer.length; i += 1) {
-    if (!appendNamedMenuItem("gMen", groupsInLayer[i].group_id)) {
-      log("emitGroupMenu: append failed for gMen item " + groupsInLayer[i].group_id);
-    }
-  }
-
-  if (groupsInLayer.length > 0) {
-    selectedGroupId = groupsInLayer[0].group_id;
-    setNamedMenuSelection("gMen", selectedGroupId);
-  } else {
-    selectedGroupId = null;
-  }
-
-  emitLineMenu();
+  lineBaseMenuFlow.emitGroupMenu();
 }
 
 function emitLayerMenu() {
-  const couldClearMenu = clearNamedMenu("aMen");
-
-  if (!couldClearMenu) {
-    log("emitLayerMenu: could not reach aMen");
-    return;
-  }
-
-  if (!hierarchy || !hierarchy.layers) {
-    selectedLayerId = null;
-    selectedGroupId = null;
-    selectedLineId = null;
-    emitGroupMenu();
-    return;
-  }
-
-  for (let i = 0; i < hierarchy.layers.length; i += 1) {
-    if (!appendNamedMenuItem("aMen", hierarchy.layers[i].layer_id)) {
-      log("emitLayerMenu: append failed for aMen item " + hierarchy.layers[i].layer_id);
-    }
-  }
-
-  if (hierarchy.layers.length > 0) {
-    selectedLayerId = hierarchy.layers[0].layer_id;
-    setNamedMenuSelection("aMen", selectedLayerId);
-  } else {
-    selectedLayerId = null;
-  }
-
-  emitGroupMenu();
+  lineBaseMenuFlow.emitLayerMenu();
 }
 
 function buildHierarchyFromCurrentLines() {
@@ -2941,98 +2592,15 @@ function rebuildSystemFromCurrentState() {
 }
 
 function emitRenderCommands() {
-  outlet(0, "sketch", "reset");
-
-  const groupPivotsById = computeGroupRenderPivotPoints();
-  const layerPivotsById = computeLayerRenderPivotPoints(groupPivotsById);
-  const scene = ensureSceneTransform();
-  const sceneSpace = ensureSceneTransformSpace();
-  const scenePivot = scene && sceneSpace === TRANSFORM_SPACE_LOCAL ? getRenderPivotPoint() : null;
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-
-    if (!isLineVisibleByHierarchy(line)) {
-      continue;
-    }
-
-    const baseStart = Array.isArray(line.base_start_coords) ? line.base_start_coords : line.start_coords;
-    const baseEnd = Array.isArray(line.base_end_coords) ? line.base_end_coords : line.end_coords;
-    const drawStart = transformedLineEndpoint(line, baseStart, groupPivotsById, layerPivotsById);
-    const drawEnd = transformedLineEndpoint(line, baseEnd, groupPivotsById, layerPivotsById);
-    const sceneStart = scene
-      ? (sceneSpace === TRANSFORM_SPACE_LOCAL && scenePivot
-        ? applyTransformToPointAroundPivot(drawStart, scene, scenePivot)
-        : applyTransformToPoint(drawStart, scene))
-      : drawStart;
-    const sceneEnd = scene
-      ? (sceneSpace === TRANSFORM_SPACE_LOCAL && scenePivot
-        ? applyTransformToPointAroundPivot(drawEnd, scene, scenePivot)
-        : applyTransformToPoint(drawEnd, scene))
-      : drawEnd;
-
-    outlet(0, "sketch", "glcolor", line.color[0], line.color[1], line.color[2], line.color[3]);
-    outlet(0, "sketch", "gllinewidth", sketchWidth(line.line_width));
-    outlet(0, "sketch", "moveto", sceneStart[0], sceneStart[1], sceneStart[2]);
-    outlet(0, "sketch", "lineto", sceneEnd[0], sceneEnd[1], sceneEnd[2]);
-  }
-
-  outlet(0, "sketch", "draw");
-  outlet(0, "sketch", "drawimmediate");
-  outlet(0, "rendered", lines.length);
+  lineBaseRender.emitRenderCommands();
 }
 
 function architecture() {
-  const layerCount = hierarchy && hierarchy.layers ? hierarchy.layers.length : 0;
-  const groupCount = hierarchy && hierarchy.groups ? hierarchy.groups.length : 0;
-  const lineCount = lines ? lines.length : 0;
-
-  outlet(0, "architecture", layerCount, groupCount, lineCount);
+  lineBaseReports.architecture();
 }
 
 function reportArchitectureRows() {
-  if (!hierarchy || !Array.isArray(hierarchy.layers) || !Array.isArray(hierarchy.groups)) {
-    log("reportArchitectureRows requires generated data");
-    return;
-  }
-
-  let rowCount = 0;
-  outlet(0, "architecture_rows_begin");
-
-  for (let i = 0; i < hierarchy.layers.length; i += 1) {
-    const layer = hierarchy.layers[i];
-    const groupIds = Array.isArray(layer.group_ids) ? layer.group_ids : [];
-    const layerNumber = parseInt(String(layer.layer_id || "").replace(/^a/i, ""), 10);
-
-    for (let j = 0; j < groupIds.length; j += 1) {
-      const group = getHierarchyGroupById(groupIds[j]);
-      if (!group || !Array.isArray(group.line_ids)) {
-        continue;
-      }
-
-      const groupNumber = parseInt(String(group.group_id || "").replace(/^g/i, ""), 10);
-
-      for (let k = 0; k < group.line_ids.length; k += 1) {
-        const lineId = group.line_ids[k];
-        const line = getLineById(lineId);
-
-        outlet(
-          0,
-          "architecture_row",
-          layerNumber,
-          groupNumber,
-          lineId,
-          layer.visible ? 1 : 0,
-          group.visible ? 1 : 0,
-          line && line.visible !== false ? 1 : 0
-        );
-
-        rowCount += 1;
-      }
-    }
-  }
-
-  outlet(0, "architecture_rows_end", rowCount);
+  lineBaseReports.reportArchitectureRows();
 }
 
 function set_pathName(nameValue) {
@@ -3153,7 +2721,7 @@ function list_views_for_pool(poolId) {
 
   let folder;
   try {
-    folder = new Folder(targetPath);
+    folder = runtime.deps.createFolder(targetPath);
   } catch (error) {
     log("list_views_for_pool could not open folder: " + targetPath);
     return;
@@ -3252,506 +2820,23 @@ function list_views_for_pool(poolId) {
 }
 
 function save_index() {
-  const targetPath = String(pathName || "").trim();
-  if (targetPath.length === 0 || targetPath === "unset") {
-    log("save_index requires pathName to be set");
-    return;
-  }
-
-  let folder;
-  try {
-    folder = new Folder(targetPath);
-  } catch (error) {
-    log("save_index could not open folder: " + targetPath);
-    return;
-  }
-
-  if (!folder) {
-    log("save_index could not open folder: " + targetPath);
-    return;
-  }
-
-  const poolsById = {};
-  const viewsByPoolId = {};
-  let totalViewCount = 0;
-  let safetyCounter = 0;
-  const maxEntries = 100000;
-
-  while (!folder.end && safetyCounter < maxEntries) {
-    const fileName = String(folder.filename || "");
-    const lowerName = fileName.toLowerCase();
-    const isJsonFile =
-      fileName !== "." &&
-      fileName !== ".." &&
-      lowerName.slice(-5) === ".json";
-
-    if (isJsonFile) {
-      const fullPath = joinPath(targetPath, fileName);
-      const rawText = readTextFile(fullPath);
-
-      if (rawText !== null) {
-        let payload = null;
-        try {
-          payload = JSON.parse(rawText);
-        } catch (error) {
-          payload = null;
-        }
-
-        if (payload && payload.type === "lineBaseSystem.pool") {
-          const poolId = typeof payload.pool_id === "string" ? payload.pool_id : "";
-          if (poolId.length > 0 && isValidLoadedPoolPayload(payload)) {
-            if (!poolsById[poolId]) {
-              poolsById[poolId] = {
-                pool_id: poolId,
-                pool_file: fullPath,
-                created_at: typeof payload.created_at === "string" ? payload.created_at : "",
-                line_count: Number(payload.line_count),
-                point_count: Number(payload.point_count),
-                random_count: Number(payload.random_count)
-              };
-            } else if (fullPath < poolsById[poolId].pool_file) {
-              poolsById[poolId].pool_file = fullPath;
-            }
-          }
-        } else if (payload && payload.type === "lineBaseSystem.view") {
-          const poolId = typeof payload.pool_id === "string" ? payload.pool_id : "";
-          if (poolId.length > 0) {
-            if (!viewsByPoolId[poolId]) {
-              viewsByPoolId[poolId] = [];
-            }
-
-            const viewId =
-              typeof payload.view_id === "string" && payload.view_id.length > 0
-                ? payload.view_id
-                : fileName.replace(/^view_/i, "").replace(/\.json$/i, "");
-
-            viewsByPoolId[poolId].push({
-              view_id: viewId,
-              view_file: fullPath,
-              saved_at: typeof payload.saved_at === "string" ? payload.saved_at : ""
-            });
-            totalViewCount += 1;
-          }
-        }
-      }
-    }
-
-    folder.next();
-    safetyCounter += 1;
-  }
-
-  if (typeof folder.close === "function") {
-    folder.close();
-  }
-
-  const poolIdsByFile = Object.keys(poolsById);
-  const poolIdsByView = Object.keys(viewsByPoolId);
-  const poolIdLookup = {};
-
-  for (let i = 0; i < poolIdsByFile.length; i += 1) {
-    poolIdLookup[poolIdsByFile[i]] = true;
-  }
-  for (let i = 0; i < poolIdsByView.length; i += 1) {
-    poolIdLookup[poolIdsByView[i]] = true;
-  }
-
-  const allPoolIds = Object.keys(poolIdLookup).sort();
-  const pools = [];
-
-  for (let i = 0; i < allPoolIds.length; i += 1) {
-    const poolId = allPoolIds[i];
-    const poolMeta = poolsById[poolId] || null;
-    const viewItems = viewsByPoolId[poolId] ? viewsByPoolId[poolId].slice() : [];
-
-    viewItems.sort(function(a, b) {
-      if (a.view_id < b.view_id) {
-        return -1;
-      }
-      if (a.view_id > b.view_id) {
-        return 1;
-      }
-
-      if (a.saved_at < b.saved_at) {
-        return -1;
-      }
-      if (a.saved_at > b.saved_at) {
-        return 1;
-      }
-
-      if (a.view_file < b.view_file) {
-        return -1;
-      }
-      if (a.view_file > b.view_file) {
-        return 1;
-      }
-
-      return 0;
-    });
-
-    pools.push({
-      pool_id: poolId,
-      pool_file: poolMeta ? poolMeta.pool_file : "",
-      created_at: poolMeta ? poolMeta.created_at : "",
-      line_count: poolMeta ? poolMeta.line_count : null,
-      point_count: poolMeta ? poolMeta.point_count : null,
-      random_count: poolMeta ? poolMeta.random_count : null,
-      view_count: viewItems.length,
-      views: viewItems
-    });
-  }
-
-  const indexPayload = {
-    type: "lineBaseSystem.index",
-    version: 1,
-    saved_at: new Date().toISOString(),
-    path_name: targetPath,
-    pool_count: pools.length,
-    view_count: totalViewCount,
-    pools: pools
-  };
-
-  const indexPath = joinPath(targetPath, "pools_index.json");
-  const serialized = JSON.stringify(indexPayload, null, 2);
-  const didWrite = writeTextFileChunked(indexPath, serialized);
-  if (!didWrite) {
-    log("save_index could not open file: " + indexPath);
-    return;
-  }
-
-  loadedIndexData = indexPayload;
-  loadedIndexPath = indexPath;
-
-  outlet(0, "index_saved", indexPath, indexPayload.pool_count, indexPayload.view_count);
+  lineBaseIndexMutations.save_index();
 }
 
 function load_index() {
-  const targetPath = String(pathName || "").trim();
-  if (targetPath.length === 0 || targetPath === "unset") {
-    log("load_index requires pathName to be set");
-    return;
-  }
-
-  const indexPath = joinPath(targetPath, "pools_index.json");
-  const rawText = readTextFile(indexPath);
-  if (rawText === null) {
-    log("load_index could not open file: " + indexPath);
-    return;
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(rawText);
-  } catch (error) {
-    log("load_index could not parse JSON: " + indexPath);
-    return;
-  }
-
-  if (!isValidLoadedIndexPayload(parsed)) {
-    log("load_index invalid index payload: " + indexPath);
-    return;
-  }
-
-  parsed.path_name = targetPath;
-  loadedIndexData = parsed;
-  loadedIndexPath = indexPath;
-
-  const poolCount = Array.isArray(parsed.pools) ? parsed.pools.length : 0;
-  let viewCount = 0;
-  for (let i = 0; i < poolCount; i += 1) {
-    const views = Array.isArray(parsed.pools[i].views) ? parsed.pools[i].views : [];
-    viewCount += views.length;
-  }
-
-  outlet(0, "index_loaded", loadedIndexPath, poolCount, viewCount);
+  lineBaseIndexMutations.load_index();
 }
 
 function clear_index_cache() {
-  const previousPath = loadedIndexPath || "";
-  const hadCache = loadedIndexData ? 1 : 0;
-
-  loadedIndexData = null;
-  loadedIndexPath = "";
-
-  outlet(0, "index_cache_cleared", previousPath, hadCache);
+  lineBaseIndexMutations.clear_index_cache();
 }
 
 function register_view(viewId, fullViewFilePath) {
-  const resolvedViewId = String(viewId || "").trim();
-  if (resolvedViewId.length === 0) {
-    log("register_view requires a non-empty viewId");
-    return;
-  }
-
-  const viewPath = String(fullViewFilePath || "").trim();
-  if (viewPath.length === 0) {
-    log("register_view requires a full view file path");
-    return;
-  }
-
-  const targetPath = String(pathName || "").trim();
-  if (targetPath.length === 0 || targetPath === "unset") {
-    log("register_view requires pathName to be set");
-    return;
-  }
-
-  const rawViewText = readTextFile(viewPath);
-  if (rawViewText === null) {
-    log("register_view could not open view file: " + viewPath);
-    return;
-  }
-
-  let viewPayload;
-  try {
-    viewPayload = JSON.parse(rawViewText);
-  } catch (error) {
-    log("register_view could not parse JSON: " + viewPath);
-    return;
-  }
-
-  if (!isValidLoadedViewPayload(viewPayload)) {
-    log("register_view invalid view payload: " + viewPath);
-    return;
-  }
-
-  const poolId = String(viewPayload.pool_id || "").trim();
-  if (poolId.length === 0) {
-    log("register_view missing pool_id in view file: " + viewPath);
-    return;
-  }
-
-  const savedAt = typeof viewPayload.saved_at === "string" ? viewPayload.saved_at : "";
-  const indexPath = joinPath(targetPath, "pools_index.json");
-
-  let indexPayload = null;
-  if (loadedIndexData && loadedIndexData.path_name === targetPath && Array.isArray(loadedIndexData.pools)) {
-    indexPayload = cloneJsonSafe(loadedIndexData);
-  } else {
-    const rawIndexText = readTextFile(indexPath);
-    if (rawIndexText !== null) {
-      try {
-        const parsedIndex = JSON.parse(rawIndexText);
-        if (isValidLoadedIndexPayload(parsedIndex)) {
-          indexPayload = parsedIndex;
-        }
-      } catch (error) {
-        indexPayload = null;
-      }
-    }
-  }
-
-  if (!indexPayload) {
-    indexPayload = {
-      type: "lineBaseSystem.index",
-      version: 1,
-      saved_at: "",
-      path_name: targetPath,
-      pool_count: 0,
-      view_count: 0,
-      pools: []
-    };
-  }
-
-  indexPayload.path_name = targetPath;
-
-  let poolEntry = null;
-  for (let i = 0; i < indexPayload.pools.length; i += 1) {
-    if (indexPayload.pools[i].pool_id === poolId) {
-      poolEntry = indexPayload.pools[i];
-      break;
-    }
-  }
-
-  if (!poolEntry) {
-    poolEntry = {
-      pool_id: poolId,
-      pool_file: "",
-      created_at: "",
-      line_count: null,
-      point_count: null,
-      random_count: null,
-      view_count: 0,
-      views: []
-    };
-    indexPayload.pools.push(poolEntry);
-  }
-
-  if (!Array.isArray(poolEntry.views)) {
-    poolEntry.views = [];
-  }
-
-  let updatedExisting = false;
-  for (let i = 0; i < poolEntry.views.length; i += 1) {
-    const existing = poolEntry.views[i];
-    if ((existing && existing.view_id === resolvedViewId) || (existing && existing.view_file === viewPath)) {
-      poolEntry.views[i] = {
-        view_id: resolvedViewId,
-        view_file: viewPath,
-        saved_at: savedAt
-      };
-      updatedExisting = true;
-      break;
-    }
-  }
-
-  if (!updatedExisting) {
-    poolEntry.views.push({
-      view_id: resolvedViewId,
-      view_file: viewPath,
-      saved_at: savedAt
-    });
-  }
-
-  for (let i = 0; i < indexPayload.pools.length; i += 1) {
-    const entry = indexPayload.pools[i];
-    if (!Array.isArray(entry.views)) {
-      entry.views = [];
-    }
-
-    entry.views.sort(function(a, b) {
-      const aViewId = typeof a.view_id === "string" ? a.view_id : "";
-      const bViewId = typeof b.view_id === "string" ? b.view_id : "";
-      if (aViewId < bViewId) {
-        return -1;
-      }
-      if (aViewId > bViewId) {
-        return 1;
-      }
-
-      const aSavedAt = typeof a.saved_at === "string" ? a.saved_at : "";
-      const bSavedAt = typeof b.saved_at === "string" ? b.saved_at : "";
-      if (aSavedAt < bSavedAt) {
-        return -1;
-      }
-      if (aSavedAt > bSavedAt) {
-        return 1;
-      }
-
-      const aFile = typeof a.view_file === "string" ? a.view_file : "";
-      const bFile = typeof b.view_file === "string" ? b.view_file : "";
-      if (aFile < bFile) {
-        return -1;
-      }
-      if (aFile > bFile) {
-        return 1;
-      }
-
-      return 0;
-    });
-
-    entry.view_count = entry.views.length;
-  }
-
-  indexPayload.pools.sort(function(a, b) {
-    const aPoolId = typeof a.pool_id === "string" ? a.pool_id : "";
-    const bPoolId = typeof b.pool_id === "string" ? b.pool_id : "";
-    if (aPoolId < bPoolId) {
-      return -1;
-    }
-    if (aPoolId > bPoolId) {
-      return 1;
-    }
-    return 0;
-  });
-
-  indexPayload.pool_count = indexPayload.pools.length;
-  let totalViewCount = 0;
-  for (let i = 0; i < indexPayload.pools.length; i += 1) {
-    totalViewCount += Array.isArray(indexPayload.pools[i].views) ? indexPayload.pools[i].views.length : 0;
-  }
-  indexPayload.view_count = totalViewCount;
-  indexPayload.saved_at = new Date().toISOString();
-
-  const serialized = JSON.stringify(indexPayload, null, 2);
-  const didWrite = writeTextFileChunked(indexPath, serialized);
-  if (!didWrite) {
-    log("register_view could not open index file: " + indexPath);
-    return;
-  }
-
-  loadedIndexData = indexPayload;
-  loadedIndexPath = indexPath;
-
-  outlet(0, "view_registered", resolvedViewId, viewPath, poolId, indexPath);
+  lineBaseIndexMutations.register_view(viewId, fullViewFilePath);
 }
 
 function unregister_view(viewId) {
-  const resolvedViewId = String(viewId || "").trim();
-  if (resolvedViewId.length === 0) {
-    log("unregister_view requires a non-empty viewId");
-    return;
-  }
-
-  const targetPath = String(pathName || "").trim();
-  if (targetPath.length === 0 || targetPath === "unset") {
-    log("unregister_view requires pathName to be set");
-    return;
-  }
-
-  const indexPath = joinPath(targetPath, "pools_index.json");
-  let indexPayload = null;
-
-  if (loadedIndexData && loadedIndexData.path_name === targetPath && Array.isArray(loadedIndexData.pools)) {
-    indexPayload = cloneJsonSafe(loadedIndexData);
-  } else {
-    const rawIndexText = readTextFile(indexPath);
-    if (rawIndexText === null) {
-      log("unregister_view could not open index file: " + indexPath);
-      return;
-    }
-
-    try {
-      const parsedIndex = JSON.parse(rawIndexText);
-      if (!isValidLoadedIndexPayload(parsedIndex)) {
-        log("unregister_view invalid index payload: " + indexPath);
-        return;
-      }
-      indexPayload = parsedIndex;
-    } catch (error) {
-      log("unregister_view could not parse JSON: " + indexPath);
-      return;
-    }
-  }
-
-  let removedCount = 0;
-  indexPayload.path_name = targetPath;
-
-  for (let i = 0; i < indexPayload.pools.length; i += 1) {
-    const poolEntry = indexPayload.pools[i];
-    const existingViews = Array.isArray(poolEntry.views) ? poolEntry.views : [];
-    const filteredViews = [];
-
-    for (let j = 0; j < existingViews.length; j += 1) {
-      const viewEntry = existingViews[j];
-      if (viewEntry && viewEntry.view_id === resolvedViewId) {
-        removedCount += 1;
-      } else {
-        filteredViews.push(viewEntry);
-      }
-    }
-
-    poolEntry.views = filteredViews;
-    poolEntry.view_count = filteredViews.length;
-  }
-
-  indexPayload.pool_count = Array.isArray(indexPayload.pools) ? indexPayload.pools.length : 0;
-  let totalViewCount = 0;
-  for (let i = 0; i < indexPayload.pools.length; i += 1) {
-    totalViewCount += Array.isArray(indexPayload.pools[i].views) ? indexPayload.pools[i].views.length : 0;
-  }
-  indexPayload.view_count = totalViewCount;
-  indexPayload.saved_at = new Date().toISOString();
-
-  const serialized = JSON.stringify(indexPayload, null, 2);
-  const didWrite = writeTextFileChunked(indexPath, serialized);
-  if (!didWrite) {
-    log("unregister_view could not open index file: " + indexPath);
-    return;
-  }
-
-  loadedIndexData = indexPayload;
-  loadedIndexPath = indexPath;
-
-  outlet(0, "view_unregistered", resolvedViewId, removedCount, indexPath);
+  lineBaseIndexMutations.unregister_view(viewId);
 }
 
 function save_randomPool() {
@@ -4080,38 +3165,7 @@ function load_view(fullFilePath) {
 }
 
 function reportHierarchy() {
-  //emits the current hierarchy to the outlet for external use (e.g., menu building) in blocks.
-  //for streaming large hierarchies, this is more efficient than sending the entire hierarchy as a single JSON object.
-  if (!hierarchy) {
-    log("reportHierarchy requires generated data");
-    return;
-  }
-
-  outlet(
-    0,
-    "hierarchy_begin",
-    hierarchy.meta.layer_count,
-    hierarchy.meta.group_count,
-    hierarchy.meta.line_count
-  );
-
-  for (let i = 0; i < hierarchy.layers.length; i += 1) {
-    const layer = hierarchy.layers[i];
-    outlet(0, "layer", layer.layer_id, layer.group_count, layer.line_count, layer.visible ? 1 : 0);
-  }
-
-  for (let j = 0; j < hierarchy.groups.length; j += 1) {
-    const group = hierarchy.groups[j];
-    outlet(0, "group", group.group_id, group.layer_id, group.line_count, group.visible ? 1 : 0);
-
-    for (let k = 0; k < group.line_ids.length; k += 1) {
-      const lineId = group.line_ids[k];
-      const line = getLineById(lineId);
-      outlet(0, "group_line", group.group_id, lineId, line && line.visible !== false ? 1 : 0);
-    }
-  }
-
-  outlet(0, "hierarchy_end");
+  lineBaseReports.reportHierarchy();
 }
 
 function buildHierarchy() {
@@ -4472,194 +3526,47 @@ function getSelectedGroupForTransformCommands() {
 }
 
 function emitLayerTransformRow(layerId) {
-  const transform = ensureLayerTransform(layerId);
-  const layerSpace = ensureLayerTransformSpace(layerId);
-  if (!transform) {
-    return;
-  }
-
-  outlet(
-    0,
-    "layer_transform",
-    layerId,
-    transform.position[0],
-    transform.position[1],
-    transform.position[2],
-    transform.rotation[0],
-    transform.rotation[1],
-    transform.rotation[2],
-    transform.scale[0],
-    transform.scale[1],
-    transform.scale[2],
-    layerSpace
-  );
+  lineBaseReports.emitLayerTransformRow(layerId);
 }
 
 function emitLayerSpaceRow(layerId) {
-  outlet(0, "layer_space", layerId, ensureLayerTransformSpace(layerId));
+  lineBaseReports.emitLayerSpaceRow(layerId);
 }
 
 function emitGroupTransformRow(groupId, layerId) {
-  const transform = ensureGroupTransform(groupId, layerId);
-  const groupSpace = ensureGroupTransformSpace(groupId);
-  if (!transform) {
-    return;
-  }
-
-  outlet(
-    0,
-    "group_transform",
-    layerId,
-    groupId,
-    transform.position[0],
-    transform.position[1],
-    transform.position[2],
-    transform.rotation[0],
-    transform.rotation[1],
-    transform.rotation[2],
-    transform.scale[0],
-    transform.scale[1],
-    transform.scale[2],
-    groupSpace
-  );
+  lineBaseReports.emitGroupTransformRow(groupId, layerId);
 }
 
 function emitGroupSpaceRow(groupId, layerId) {
-  outlet(0, "group_space", layerId, groupId, ensureGroupTransformSpace(groupId));
+  lineBaseReports.emitGroupSpaceRow(groupId, layerId);
 }
 
 function emitSceneTransformRow() {
-  const transform = ensureSceneTransform();
-  const sceneSpace = ensureSceneTransformSpace();
-  if (!transform) {
-    return;
-  }
-
-  outlet(
-    0,
-    "scene_transform",
-    transform.position[0],
-    transform.position[1],
-    transform.position[2],
-    transform.rotation[0],
-    transform.rotation[1],
-    transform.rotation[2],
-    transform.scale[0],
-    transform.scale[1],
-    transform.scale[2],
-    sceneSpace
-  );
+  lineBaseReports.emitSceneTransformRow();
 }
 
 function emitSceneSpaceRow() {
-  outlet(0, "scene_space", ensureSceneTransformSpace());
+  lineBaseReports.emitSceneSpaceRow();
 }
 
 function setLayerPosition(x, y, z) {
-  const layer = getSelectedLayerForTransformCommands();
-  if (!layer) {
-    return;
-  }
-
-  ensureLayerTransformSpace(layer.layer_id);
-
-  const px = parseTransformNumber(x);
-  const py = parseTransformNumber(y);
-  const pz = parseTransformNumber(z);
-  if (px === null || py === null || pz === null) {
-    log("setLayerPosition requires finite numeric values");
-    return;
-  }
-
-  const transform = ensureLayerTransform(layer.layer_id);
-  transform.position = [px, py, pz];
-  emitRenderCommands();
-  outlet(0, "transform_set", "layer", layer.layer_id);
+  lineBaseTransformMutations.setLayerPosition(x, y, z);
 }
 
 function setLayerRotation(x, y, z) {
-  const layer = getSelectedLayerForTransformCommands();
-  if (!layer) {
-    return;
-  }
-
-  ensureLayerTransformSpace(layer.layer_id);
-
-  const rx = parseTransformNumber(x);
-  const ry = parseTransformNumber(y);
-  const rz = parseTransformNumber(z);
-  if (rx === null || ry === null || rz === null) {
-    log("setLayerRotation requires finite numeric values");
-    return;
-  }
-
-  const transform = ensureLayerTransform(layer.layer_id);
-  transform.rotation = [rx, ry, rz];
-  emitRenderCommands();
-  outlet(0, "transform_set", "layer", layer.layer_id);
+  lineBaseTransformMutations.setLayerRotation(x, y, z);
 }
 
 function setLayerScale(x, y, z) {
-  const layer = getSelectedLayerForTransformCommands();
-  if (!layer) {
-    return;
-  }
-
-  ensureLayerTransformSpace(layer.layer_id);
-
-  const sx = parseTransformNumber(x);
-  const sy = parseTransformNumber(y);
-  const sz = parseTransformNumber(z);
-  if (sx === null || sy === null || sz === null || sx === 0 || sy === 0 || sz === 0) {
-    log("setLayerScale requires non-zero numeric values");
-    return;
-  }
-
-  const transform = ensureLayerTransform(layer.layer_id);
-  transform.scale = [sx, sy, sz];
-  emitRenderCommands();
-  outlet(0, "transform_set", "layer", layer.layer_id);
+  lineBaseTransformMutations.setLayerScale(x, y, z);
 }
 
 function setLayerTransform(px, py, pz, rx, ry, rz, sx, sy, sz) {
-  const layer = getSelectedLayerForTransformCommands();
-  if (!layer) {
-    return;
-  }
-
-  ensureLayerTransformSpace(layer.layer_id);
-
-  const position = [parseTransformNumber(px), parseTransformNumber(py), parseTransformNumber(pz)];
-  const rotation = [parseTransformNumber(rx), parseTransformNumber(ry), parseTransformNumber(rz)];
-  const scale = [parseTransformNumber(sx), parseTransformNumber(sy), parseTransformNumber(sz)];
-
-  if (
-    position[0] === null || position[1] === null || position[2] === null ||
-    rotation[0] === null || rotation[1] === null || rotation[2] === null ||
-    scale[0] === null || scale[1] === null || scale[2] === null ||
-    scale[0] === 0 || scale[1] === 0 || scale[2] === 0
-  ) {
-    log("setLayerTransform requires finite position/rotation and non-zero scale values");
-    return;
-  }
-
-  const transform = ensureLayerTransform(layer.layer_id);
-  transform.position = position;
-  transform.rotation = rotation;
-  transform.scale = scale;
-  emitRenderCommands();
-  outlet(0, "transform_set", "layer", layer.layer_id);
+  lineBaseTransformMutations.setLayerTransform(px, py, pz, rx, ry, rz, sx, sy, sz);
 }
 
 function resetLayerTransform() {
-  const layer = getSelectedLayerForTransformCommands();
-  if (!layer) {
-    return;
-  }
-
-  layerTransformsById[layer.layer_id] = createIdentityTransform();
-  emitRenderCommands();
-  outlet(0, "transform_reset", "layer", layer.layer_id);
+  lineBaseTransformMutations.resetLayerTransform();
 }
 
 function getLayerTransform() {
@@ -4672,19 +3579,7 @@ function getLayerTransform() {
 }
 
 function setLayerSpace(mode) {
-  const layer = getSelectedLayerForTransformCommands();
-  if (!layer) {
-    return;
-  }
-
-  if (!isValidSceneTransformSpaceValue(mode)) {
-    log("setLayerSpace requires local or world");
-    return;
-  }
-
-  layerTransformSpacesById[layer.layer_id] = normalizeSceneTransformSpace(mode);
-  emitRenderCommands();
-  outlet(0, "transform_space_set", "layer", layer.layer_id, layerTransformSpacesById[layer.layer_id]);
+  lineBaseTransformMutations.setLayerSpace(mode);
 }
 
 function getLayerSpace() {
@@ -4697,112 +3592,23 @@ function getLayerSpace() {
 }
 
 function setGroupPosition(x, y, z) {
-  const group = getSelectedGroupForTransformCommands();
-  if (!group) {
-    return;
-  }
-
-  ensureGroupTransformSpace(group.group_id);
-
-  const px = parseTransformNumber(x);
-  const py = parseTransformNumber(y);
-  const pz = parseTransformNumber(z);
-  if (px === null || py === null || pz === null) {
-    log("setGroupPosition requires finite numeric values");
-    return;
-  }
-
-  const transform = ensureGroupTransform(group.group_id, group.layer_id);
-  transform.position = [px, py, pz];
-  emitRenderCommands();
-  outlet(0, "transform_set", "group", group.group_id);
+  lineBaseTransformMutations.setGroupPosition(x, y, z);
 }
 
 function setGroupRotation(x, y, z) {
-  const group = getSelectedGroupForTransformCommands();
-  if (!group) {
-    return;
-  }
-
-  ensureGroupTransformSpace(group.group_id);
-
-  const rx = parseTransformNumber(x);
-  const ry = parseTransformNumber(y);
-  const rz = parseTransformNumber(z);
-  if (rx === null || ry === null || rz === null) {
-    log("setGroupRotation requires finite numeric values");
-    return;
-  }
-
-  const transform = ensureGroupTransform(group.group_id, group.layer_id);
-  transform.rotation = [rx, ry, rz];
-  emitRenderCommands();
-  outlet(0, "transform_set", "group", group.group_id);
+  lineBaseTransformMutations.setGroupRotation(x, y, z);
 }
 
 function setGroupScale(x, y, z) {
-  const group = getSelectedGroupForTransformCommands();
-  if (!group) {
-    return;
-  }
-
-  ensureGroupTransformSpace(group.group_id);
-
-  const sx = parseTransformNumber(x);
-  const sy = parseTransformNumber(y);
-  const sz = parseTransformNumber(z);
-  if (sx === null || sy === null || sz === null || sx === 0 || sy === 0 || sz === 0) {
-    log("setGroupScale requires non-zero numeric values");
-    return;
-  }
-
-  const transform = ensureGroupTransform(group.group_id, group.layer_id);
-  transform.scale = [sx, sy, sz];
-  emitRenderCommands();
-  outlet(0, "transform_set", "group", group.group_id);
+  lineBaseTransformMutations.setGroupScale(x, y, z);
 }
 
 function setGroupTransform(px, py, pz, rx, ry, rz, sx, sy, sz) {
-  const group = getSelectedGroupForTransformCommands();
-  if (!group) {
-    return;
-  }
-
-  ensureGroupTransformSpace(group.group_id);
-
-  const position = [parseTransformNumber(px), parseTransformNumber(py), parseTransformNumber(pz)];
-  const rotation = [parseTransformNumber(rx), parseTransformNumber(ry), parseTransformNumber(rz)];
-  const scale = [parseTransformNumber(sx), parseTransformNumber(sy), parseTransformNumber(sz)];
-
-  if (
-    position[0] === null || position[1] === null || position[2] === null ||
-    rotation[0] === null || rotation[1] === null || rotation[2] === null ||
-    scale[0] === null || scale[1] === null || scale[2] === null ||
-    scale[0] === 0 || scale[1] === 0 || scale[2] === 0
-  ) {
-    log("setGroupTransform requires finite position/rotation and non-zero scale values");
-    return;
-  }
-
-  const transform = ensureGroupTransform(group.group_id, group.layer_id);
-  transform.position = position;
-  transform.rotation = rotation;
-  transform.scale = scale;
-  emitRenderCommands();
-  outlet(0, "transform_set", "group", group.group_id);
+  lineBaseTransformMutations.setGroupTransform(px, py, pz, rx, ry, rz, sx, sy, sz);
 }
 
 function resetGroupTransform() {
-  const group = getSelectedGroupForTransformCommands();
-  if (!group) {
-    return;
-  }
-
-  const identity = createIdentityTransform();
-  identity.layer_id = group.layer_id;
-  groupTransformsById[group.group_id] = identity;
-  emitRenderCommands();
-  outlet(0, "transform_reset", "group", group.group_id);
+  lineBaseTransformMutations.resetGroupTransform();
 }
 
 function getGroupTransform() {
@@ -4816,19 +3622,7 @@ function getGroupTransform() {
 }
 
 function setGroupSpace(mode) {
-  const group = getSelectedGroupForTransformCommands();
-  if (!group) {
-    return;
-  }
-
-  if (!isValidSceneTransformSpaceValue(mode)) {
-    log("setGroupSpace requires local or world");
-    return;
-  }
-
-  groupTransformSpacesById[group.group_id] = normalizeSceneTransformSpace(mode);
-  emitRenderCommands();
-  outlet(0, "transform_space_set", "group", group.group_id, groupTransformSpacesById[group.group_id]);
+  lineBaseTransformMutations.setGroupSpace(mode);
 }
 
 function getGroupSpace() {
@@ -4841,85 +3635,23 @@ function getGroupSpace() {
 }
 
 function setScenePosition(x, y, z) {
-  ensureSceneTransformSpace();
-
-  const px = parseTransformNumber(x);
-  const py = parseTransformNumber(y);
-  const pz = parseTransformNumber(z);
-  if (px === null || py === null || pz === null) {
-    log("setScenePosition requires finite numeric values");
-    return;
-  }
-
-  const transform = ensureSceneTransform();
-  transform.position = [px, py, pz];
-  emitRenderCommands();
-  outlet(0, "transform_set", "scene");
+  lineBaseTransformMutations.setScenePosition(x, y, z);
 }
 
 function setSceneRotation(x, y, z) {
-  ensureSceneTransformSpace();
-
-  const rx = parseTransformNumber(x);
-  const ry = parseTransformNumber(y);
-  const rz = parseTransformNumber(z);
-  if (rx === null || ry === null || rz === null) {
-    log("setSceneRotation requires finite numeric values");
-    return;
-  }
-
-  const transform = ensureSceneTransform();
-  transform.rotation = [rx, ry, rz];
-  emitRenderCommands();
-  outlet(0, "transform_set", "scene");
+  lineBaseTransformMutations.setSceneRotation(x, y, z);
 }
 
 function setSceneScale(x, y, z) {
-  ensureSceneTransformSpace();
-
-  const sx = parseTransformNumber(x);
-  const sy = parseTransformNumber(y);
-  const sz = parseTransformNumber(z);
-  if (sx === null || sy === null || sz === null || sx === 0 || sy === 0 || sz === 0) {
-    log("setSceneScale requires non-zero numeric values");
-    return;
-  }
-
-  const transform = ensureSceneTransform();
-  transform.scale = [sx, sy, sz];
-  emitRenderCommands();
-  outlet(0, "transform_set", "scene");
+  lineBaseTransformMutations.setSceneScale(x, y, z);
 }
 
 function setSceneTransform(px, py, pz, rx, ry, rz, sx, sy, sz) {
-  ensureSceneTransformSpace();
-
-  const position = [parseTransformNumber(px), parseTransformNumber(py), parseTransformNumber(pz)];
-  const rotation = [parseTransformNumber(rx), parseTransformNumber(ry), parseTransformNumber(rz)];
-  const scale = [parseTransformNumber(sx), parseTransformNumber(sy), parseTransformNumber(sz)];
-
-  if (
-    position[0] === null || position[1] === null || position[2] === null ||
-    rotation[0] === null || rotation[1] === null || rotation[2] === null ||
-    scale[0] === null || scale[1] === null || scale[2] === null ||
-    scale[0] === 0 || scale[1] === 0 || scale[2] === 0
-  ) {
-    log("setSceneTransform requires finite position/rotation and non-zero scale values");
-    return;
-  }
-
-  const transform = ensureSceneTransform();
-  transform.position = position;
-  transform.rotation = rotation;
-  transform.scale = scale;
-  emitRenderCommands();
-  outlet(0, "transform_set", "scene");
+  lineBaseTransformMutations.setSceneTransform(px, py, pz, rx, ry, rz, sx, sy, sz);
 }
 
 function resetSceneTransform() {
-  sceneTransform = createIdentityTransform();
-  emitRenderCommands();
-  outlet(0, "transform_reset", "scene");
+  lineBaseTransformMutations.resetSceneTransform();
 }
 
 function getSceneTransform() {
@@ -4927,14 +3659,7 @@ function getSceneTransform() {
 }
 
 function setSceneSpace(mode) {
-  if (!isValidSceneTransformSpaceValue(mode)) {
-    log("setSceneSpace requires local or world");
-    return;
-  }
-
-  sceneTransformSpace = normalizeSceneTransformSpace(mode);
-  emitRenderCommands();
-  outlet(0, "transform_space_set", "scene", sceneTransformSpace);
+  lineBaseTransformMutations.setSceneSpace(mode);
 }
 
 function getSceneSpace() {
@@ -5041,28 +3766,7 @@ function reportTransforms() {
 }
 
 function resetAllTransforms() {
-  if (!hierarchy || !Array.isArray(hierarchy.layers) || !Array.isArray(hierarchy.groups)) {
-    log("resetAllTransforms requires generated data");
-    return;
-  }
-
-  for (let i = 0; i < hierarchy.layers.length; i += 1) {
-    layerTransformsById[hierarchy.layers[i].layer_id] = createIdentityTransform();
-    layerTransformSpacesById[hierarchy.layers[i].layer_id] = TRANSFORM_SPACE_LOCAL;
-  }
-
-  for (let i = 0; i < hierarchy.groups.length; i += 1) {
-    const group = hierarchy.groups[i];
-    const identity = createIdentityTransform();
-    identity.layer_id = group.layer_id;
-    groupTransformsById[group.group_id] = identity;
-    groupTransformSpacesById[group.group_id] = TRANSFORM_SPACE_LOCAL;
-  }
-
-  sceneTransform = createIdentityTransform();
-
-  emitRenderCommands();
-  outlet(0, "transforms_reset_all");
+  lineBaseTransformMutations.resetAllTransforms();
 }
 
 function setForm(formName) {
