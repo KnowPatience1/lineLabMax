@@ -5,9 +5,22 @@
 Syntax: generate 120  
 Purpose: Generates and freezes the random pool, builds lines, builds hierarchy, and renders.
 
-2. reshuffle  
-Syntax: reshuffle  
+2. reshuffleLines  
+Syntax: reshuffleLines  
 Purpose: Keeps the same frozen pool, reshuffles point pairing/order, rebuilds hierarchy, and rerenders.
+
+2a. reshuffleCoords
+Syntax: reshuffleCoords
+Purpose: Independently reshuffles x, y, and z coordinate pools, rebuilds hierarchy, and rerenders.
+
+2b. reshuffleAll
+Syntax: reshuffleAll
+Purpose: Reshuffles the full original random stream (coordinates and appearance drivers), rebuilds hierarchy, and rerenders without mutating the frozen pool.
+
+2c. sortAllNumbers
+Syntax: sortAllNumbers asc
+Syntax: sortAllNumbers desc
+Purpose: Sorts the full original random stream numerically (ascending or descending), rebuilds hierarchy, and rerenders without mutating the frozen pool.
 
 3. setForm formName  
 Syntax: setForm cube  
@@ -58,7 +71,7 @@ Purpose: Repopulates aMen -> gMen -> lMen from current hierarchy and re-emits cu
 Syntax: architecture
 Purpose: Emits architecture counts to the outlet as: architecture layerCount groupCount lineCount.
   Call architecture directly from Max when needed.
-  Also receive fresh architecture counts automatically on hierarchy rebuild paths (generate, reshuffle, buildHierarchy, range changes).
+  Also receive fresh architecture counts automatically on hierarchy rebuild paths (generate, reshuffleLines, buildHierarchy, range changes).
 
 13. set_pathName nameValue
 Syntax: set_pathName pool_001
@@ -125,6 +138,7 @@ Purpose: Removes stale view entries from pools_index.json by view id.
 28. clearMenus
 Syntax: clearMenus
 Purpose: Clears the aMen, gMen, and lMen menus in the Max patch and resets current selections.
+This is one of the few commands which does not require a pathName to be set, since it is purely a Max UI operation.
 
 29. reportArchitectureRows
 Syntax: reportArchitectureRows
@@ -246,6 +260,37 @@ Purpose: Sets Scene transform space mode used by scene transform commands and re
 Syntax: getSceneSpace
 Purpose: Emits current Scene transform space mode.
 
+58. setSortCoords axis mode amount
+Syntax: setSortCoords x asc 1
+Syntax: setSortCoords xyz desc 0.5
+Purpose: Stores coordinate sort intent for applySort. Axis accepts x|y|z|xyz, mode accepts asc|desc, amount is clamped to 0..1.
+
+59. setSortColors channel mode amount
+Syntax: setSortColors r asc 1
+Syntax: setSortColors rgba desc 0.35
+Purpose: Stores color sort intent for applySort. Channel accepts r|g|b|a|rgba, mode accepts asc|desc, amount is clamped to 0..1.
+
+60. setSortWidth mode amount
+Syntax: setSortWidth asc 1
+Syntax: setSortWidth desc 0.25
+Purpose: Stores width sort intent for applySort. Mode accepts asc|desc, amount is clamped to 0..1.
+
+61. applySort
+Syntax: applySort
+Purpose: Applies current coordinate/color/width sort intents to mutable line state and rerenders.
+
+62. resetSort
+Syntax: resetSort
+Purpose: Resets sort intents to defaults, restores unsorted mutable state from active pool + current point order, and rerenders.
+
+63. getSortState
+Syntax: getSortState
+Purpose: Emits current sort configuration and applied flag.
+
+64. reportSortRows
+Syntax: reportSortRows
+Purpose: Emits sort configuration rows for Max routing.
+
 Important usage notes:
 1. targetType must be layer, group, or line.
 2. Layer ids are a1, a2, a3...
@@ -301,6 +346,26 @@ Group transform outlet messages:
   Emitted by reportTransforms between transforms_begin and transforms_end.
 - transform_space_set group groupId local|world
   Emitted by setGroupSpace.
+
+Sort outlet messages:
+- sort_set coords axis mode amount
+  Emitted by setSortCoords.
+- sort_set colors channel mode amount
+  Emitted by setSortColors.
+- sort_set width mode amount
+  Emitted by setSortWidth.
+- sort_applied
+  Emitted by applySort.
+- sort_reset
+  Emitted by resetSort.
+- sort_state coordsAxis coordsMode coordsAmount colorsChannel colorsMode colorsAmount widthMode widthAmount appliedFlag
+  Emitted by getSortState.
+- sort_rows_begin
+  Emitted by reportSortRows before row payloads.
+- sort_row target key mode amount
+  Emitted by reportSortRows.
+- sort_rows_end rowCount
+  Emitted by reportSortRows after row payloads.
 */
 
 "use strict";
@@ -315,9 +380,23 @@ const DEFAULT_GROUPS_PER_LAYER_RANGE = { min: 1, max: 5 };
 const DEFAULT_LINES_PER_GROUP_RANGE = { min: 1, max: 1000 };
 const TRANSFORM_SPACE_LOCAL = "local";
 const TRANSFORM_SPACE_WORLD = "world";
+const SORT_MODE_ASC = "asc";
+const SORT_MODE_DESC = "desc";
+const SORT_AXIS_X = "x";
+const SORT_AXIS_Y = "y";
+const SORT_AXIS_Z = "z";
+const SORT_AXIS_XYZ = "xyz";
+const SORT_CHANNEL_R = "r";
+const SORT_CHANNEL_G = "g";
+const SORT_CHANNEL_B = "b";
+const SORT_CHANNEL_A = "a";
+const SORT_CHANNEL_RGBA = "rgba";
 
 // declare variable for randomPool. This will hold the frozen random values and coordinates for line generation.
 let randomPool = null;
+let coordinateOverrides = null;
+let poolOverrides = null;
+let sortState = createDefaultSortState();
 // declare array for pointOrder. This array will be shuffled to create random line pairings.
 let pointOrder = [];
 // declare array for lineDefinitions. This array will hold the start and end point indices for each line.
@@ -739,6 +818,19 @@ function isValidLoadedViewPayload(payload) {
   if (typeof payload.transform_version !== "undefined") {
     const transformVersion = Number(payload.transform_version);
     if (!isFinite(transformVersion) || Math.floor(transformVersion) !== transformVersion || transformVersion < 1) {
+      return false;
+    }
+  }
+
+  if (typeof payload.sort_version !== "undefined") {
+    const sortVersion = Number(payload.sort_version);
+    if (!isFinite(sortVersion) || Math.floor(sortVersion) !== sortVersion || sortVersion < 1) {
+      return false;
+    }
+  }
+
+  if (typeof payload.sort_state !== "undefined") {
+    if (!payload.sort_state || typeof payload.sort_state !== "object") {
       return false;
     }
   }
@@ -1603,6 +1695,294 @@ function mapToRange(value, min, max) {
   return min + value * (max - min);
 }
 
+function createDefaultSortState() {
+  return {
+    coords: {
+      axis: SORT_AXIS_XYZ,
+      mode: SORT_MODE_ASC,
+      amount: 0
+    },
+    colors: {
+      channel: SORT_CHANNEL_RGBA,
+      mode: SORT_MODE_ASC,
+      amount: 0
+    },
+    width: {
+      mode: SORT_MODE_ASC,
+      amount: 0
+    },
+    applied: 0
+  };
+}
+
+function cloneSortState(state) {
+  return {
+    coords: {
+      axis: state.coords.axis,
+      mode: state.coords.mode,
+      amount: Number(state.coords.amount)
+    },
+    colors: {
+      channel: state.colors.channel,
+      mode: state.colors.mode,
+      amount: Number(state.colors.amount)
+    },
+    width: {
+      mode: state.width.mode,
+      amount: Number(state.width.amount)
+    },
+    applied: state.applied ? 1 : 0
+  };
+}
+
+function clampSortAmount(amount) {
+  const numeric = Number(amount);
+  if (!isFinite(numeric)) {
+    return 0;
+  }
+
+  if (numeric < 0) {
+    return 0;
+  }
+
+  if (numeric > 1) {
+    return 1;
+  }
+
+  return numeric;
+}
+
+function isValidSortMode(mode) {
+  return mode === SORT_MODE_ASC || mode === SORT_MODE_DESC;
+}
+
+function isValidSortAxis(axis) {
+  return axis === SORT_AXIS_X || axis === SORT_AXIS_Y || axis === SORT_AXIS_Z || axis === SORT_AXIS_XYZ;
+}
+
+function isValidSortChannel(channel) {
+  return (
+    channel === SORT_CHANNEL_R ||
+    channel === SORT_CHANNEL_G ||
+    channel === SORT_CHANNEL_B ||
+    channel === SORT_CHANNEL_A ||
+    channel === SORT_CHANNEL_RGBA
+  );
+}
+
+function sanitizeSortMode(mode, fallback) {
+  const normalized = String(mode || "").toLowerCase();
+  return isValidSortMode(normalized) ? normalized : fallback;
+}
+
+function sanitizeSortAxis(axis) {
+  const normalized = String(axis || "").toLowerCase();
+  return isValidSortAxis(normalized) ? normalized : SORT_AXIS_XYZ;
+}
+
+function sanitizeSortChannel(channel) {
+  const normalized = String(channel || "").toLowerCase();
+  return isValidSortChannel(normalized) ? normalized : SORT_CHANNEL_RGBA;
+}
+
+function sanitizeSortState(rawState) {
+  const fallback = createDefaultSortState();
+  const source = rawState && typeof rawState === "object" ? rawState : {};
+  const coords = source.coords && typeof source.coords === "object" ? source.coords : {};
+  const colors = source.colors && typeof source.colors === "object" ? source.colors : {};
+  const width = source.width && typeof source.width === "object" ? source.width : {};
+
+  return {
+    coords: {
+      axis: sanitizeSortAxis(coords.axis),
+      mode: sanitizeSortMode(coords.mode, fallback.coords.mode),
+      amount: clampSortAmount(coords.amount)
+    },
+    colors: {
+      channel: sanitizeSortChannel(colors.channel),
+      mode: sanitizeSortMode(colors.mode, fallback.colors.mode),
+      amount: clampSortAmount(colors.amount)
+    },
+    width: {
+      mode: sanitizeSortMode(width.mode, fallback.width.mode),
+      amount: clampSortAmount(width.amount)
+    },
+    applied: source.applied ? 1 : 0
+  };
+}
+
+function hasActiveSortAmounts(state) {
+  return (
+    Number(state.coords.amount) > 0 ||
+    Number(state.colors.amount) > 0 ||
+    Number(state.width.amount) > 0
+  );
+}
+
+function ensureSortDataAvailable(commandName) {
+  if (!randomPool || !lines || lines.length === 0) {
+    log(commandName + " requires generated data");
+    return false;
+  }
+
+  return true;
+}
+
+function sortBlendValues(values, mode, amount) {
+  const sourceValues = values.slice();
+  const blendedAmount = clampSortAmount(amount);
+
+  if (blendedAmount <= 0) {
+    return sourceValues;
+  }
+
+  const sortedValues = values.slice().sort(function(a, b) {
+    return mode === SORT_MODE_DESC ? b - a : a - b;
+  });
+
+  if (blendedAmount >= 1) {
+    return sortedValues;
+  }
+
+  const blendedValues = [];
+  for (let i = 0; i < sourceValues.length; i += 1) {
+    blendedValues.push(sourceValues[i] + (sortedValues[i] - sourceValues[i]) * blendedAmount);
+  }
+
+  return blendedValues;
+}
+
+function buildBaselineLinesFromCurrentPool() {
+  if (!randomPool) {
+    return [];
+  }
+
+  const definitions = buildLineDefinitionsFromPointOrder(pointOrder);
+  const activeAttributes = getActiveAttributes(randomPool);
+  const baselineLines = [];
+
+  for (let i = 0; i < definitions.length; i += 1) {
+    const definition = definitions[i];
+    const startPointIndex = definition.start_index;
+    const endPointIndex = definition.end_index;
+    const startCoords = getPointCoordinates(randomPool, startPointIndex);
+    const endCoords = getPointCoordinates(randomPool, endPointIndex);
+
+    baselineLines.push({
+      id: definition.id,
+      start_coords: startCoords,
+      end_coords: endCoords,
+      color: [
+        activeAttributes.r[startPointIndex],
+        activeAttributes.g[startPointIndex],
+        activeAttributes.b[startPointIndex],
+        activeAttributes.a[startPointIndex]
+      ],
+      line_width: activeAttributes.line_width[startPointIndex]
+    });
+  }
+
+  return baselineLines;
+}
+
+function applySortedStateToBaselineLines(baselineLines, state) {
+  const activeState = sanitizeSortState(state);
+
+  if (Number(activeState.coords.amount) > 0) {
+    const endpointEntries = [];
+    for (let i = 0; i < baselineLines.length; i += 1) {
+      endpointEntries.push({ line: baselineLines[i], key: "start_coords" });
+      endpointEntries.push({ line: baselineLines[i], key: "end_coords" });
+    }
+
+    const axisList = activeState.coords.axis === SORT_AXIS_XYZ
+      ? [SORT_AXIS_X, SORT_AXIS_Y, SORT_AXIS_Z]
+      : [activeState.coords.axis];
+
+    for (let axisIndex = 0; axisIndex < axisList.length; axisIndex += 1) {
+      const axisName = axisList[axisIndex];
+      const coordinateIndex = axisName === SORT_AXIS_X ? 0 : (axisName === SORT_AXIS_Y ? 1 : 2);
+      const values = [];
+
+      for (let i = 0; i < endpointEntries.length; i += 1) {
+        values.push(Number(endpointEntries[i].line[endpointEntries[i].key][coordinateIndex]));
+      }
+
+      const blended = sortBlendValues(values, activeState.coords.mode, activeState.coords.amount);
+      for (let i = 0; i < endpointEntries.length; i += 1) {
+        endpointEntries[i].line[endpointEntries[i].key][coordinateIndex] = blended[i];
+      }
+    }
+  }
+
+  if (Number(activeState.colors.amount) > 0) {
+    const channelIndexes = activeState.colors.channel === SORT_CHANNEL_RGBA
+      ? [0, 1, 2, 3]
+      : [
+        activeState.colors.channel === SORT_CHANNEL_R
+          ? 0
+          : activeState.colors.channel === SORT_CHANNEL_G
+            ? 1
+            : activeState.colors.channel === SORT_CHANNEL_B
+              ? 2
+              : 3
+      ];
+
+    for (let c = 0; c < channelIndexes.length; c += 1) {
+      const colorIndex = channelIndexes[c];
+      const values = [];
+      for (let i = 0; i < baselineLines.length; i += 1) {
+        values.push(Number(baselineLines[i].color[colorIndex]));
+      }
+
+      const blended = sortBlendValues(values, activeState.colors.mode, activeState.colors.amount);
+      for (let i = 0; i < baselineLines.length; i += 1) {
+        baselineLines[i].color[colorIndex] = blended[i];
+      }
+    }
+  }
+
+  if (Number(activeState.width.amount) > 0) {
+    const widths = [];
+    for (let i = 0; i < baselineLines.length; i += 1) {
+      widths.push(Number(baselineLines[i].line_width));
+    }
+
+    const blendedWidths = sortBlendValues(widths, activeState.width.mode, activeState.width.amount);
+    for (let i = 0; i < baselineLines.length; i += 1) {
+      baselineLines[i].line_width = blendedWidths[i];
+    }
+  }
+}
+
+function applyBaselineLinesToCurrentLines(baselineLines) {
+  const baselineById = {};
+  for (let i = 0; i < baselineLines.length; i += 1) {
+    baselineById[baselineLines[i].id] = baselineLines[i];
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const targetLine = lines[i];
+    const baseline = baselineById[targetLine.id];
+    if (!baseline) {
+      continue;
+    }
+
+    targetLine.base_start_coords = baseline.start_coords.slice();
+    targetLine.base_end_coords = baseline.end_coords.slice();
+    targetLine.start_coords = baseline.start_coords.slice();
+    targetLine.end_coords = baseline.end_coords.slice();
+    targetLine.color = baseline.color.slice();
+    targetLine.line_width = Number(baseline.line_width);
+  }
+}
+
+function applyCurrentSortStateToLines() {
+  const baselineLines = buildBaselineLinesFromCurrentPool();
+  applySortedStateToBaselineLines(baselineLines, sortState);
+  applyBaselineLinesToCurrentLines(baselineLines);
+}
+
 function sketchWidth(lineWidth) {
   return Math.max(2, Number(lineWidth) * 120);
 }
@@ -1638,6 +2018,56 @@ function shufflePointOrder(order) {
     order[i] = order[randomPosition];
     order[randomPosition] = swapValue;
   }
+}
+
+function getActiveCoordinates(pool) {
+  if (
+    poolOverrides &&
+    poolOverrides.coordinates &&
+    poolOverrides.coordinates.x &&
+    poolOverrides.coordinates.y &&
+    poolOverrides.coordinates.z &&
+    poolOverrides.coordinates.x.length === pool.point_count &&
+    poolOverrides.coordinates.y.length === pool.point_count &&
+    poolOverrides.coordinates.z.length === pool.point_count
+  ) {
+    return poolOverrides.coordinates;
+  }
+
+  if (
+    coordinateOverrides &&
+    coordinateOverrides.x &&
+    coordinateOverrides.y &&
+    coordinateOverrides.z &&
+    coordinateOverrides.x.length === pool.point_count &&
+    coordinateOverrides.y.length === pool.point_count &&
+    coordinateOverrides.z.length === pool.point_count
+  ) {
+    return coordinateOverrides;
+  }
+
+  return pool.coordinates;
+}
+
+function getActiveAttributes(pool) {
+  if (
+    poolOverrides &&
+    poolOverrides.attributes &&
+    poolOverrides.attributes.r &&
+    poolOverrides.attributes.g &&
+    poolOverrides.attributes.b &&
+    poolOverrides.attributes.a &&
+    poolOverrides.attributes.line_width &&
+    poolOverrides.attributes.r.length === pool.point_count &&
+    poolOverrides.attributes.g.length === pool.point_count &&
+    poolOverrides.attributes.b.length === pool.point_count &&
+    poolOverrides.attributes.a.length === pool.point_count &&
+    poolOverrides.attributes.line_width.length === pool.point_count
+  ) {
+    return poolOverrides.attributes;
+  }
+
+  return pool.attributes;
 }
 
 function deepFreezeObject(value) {
@@ -1748,17 +2178,19 @@ function buildRandomPool(lineCount) {
 }
 
 function mapCubePoint(pool, pointIndex) {
+  const coordinates = getActiveCoordinates(pool);
   return [
-    mapToRange(pool.coordinates.x[pointIndex], -1.0, 1.0),
-    mapToRange(pool.coordinates.y[pointIndex], -1.0, 1.0),
-    mapToRange(pool.coordinates.z[pointIndex], -1.0, 1.0)
+    mapToRange(coordinates.x[pointIndex], -1.0, 1.0),
+    mapToRange(coordinates.y[pointIndex], -1.0, 1.0),
+    mapToRange(coordinates.z[pointIndex], -1.0, 1.0)
   ];
 }
 
 function mapSpherePoint(pool, pointIndex) {
-  const radius = Math.cbrt(pool.coordinates.x[pointIndex]);
-  const theta = pool.coordinates.y[pointIndex] * Math.PI * 2;
-  const phi = Math.acos(2.0 * pool.coordinates.z[pointIndex] - 1.0);
+  const coordinates = getActiveCoordinates(pool);
+  const radius = Math.cbrt(coordinates.x[pointIndex]);
+  const theta = coordinates.y[pointIndex] * Math.PI * 2;
+  const phi = Math.acos(2.0 * coordinates.z[pointIndex] - 1.0);
 
   const sinPhi = Math.sin(phi);
 
@@ -1792,6 +2224,7 @@ function buildLineDefinitionsFromPointOrder(order) {
 
 function buildLinesFromPool(pool, definitions) {
   lines = [];
+  const attributes = getActiveAttributes(pool);
 
   for (let i = 0; i < definitions.length; i += 1) {
     const definition = definitions[i];
@@ -1807,12 +2240,12 @@ function buildLinesFromPool(pool, definitions) {
       start_coords: startCoords,
       end_coords: endCoords,
       color: [
-        pool.attributes.r[startPointIndex],
-        pool.attributes.g[startPointIndex],
-        pool.attributes.b[startPointIndex],
-        pool.attributes.a[startPointIndex]
+        attributes.r[startPointIndex],
+        attributes.g[startPointIndex],
+        attributes.b[startPointIndex],
+        attributes.a[startPointIndex]
       ],
-      line_width: pool.attributes.line_width[startPointIndex],
+      line_width: attributes.line_width[startPointIndex],
       visible: true
     });
   }
@@ -2638,6 +3071,9 @@ function rebuild_from_loaded_pool() {
     return;
   }
 
+  coordinateOverrides = null;
+  poolOverrides = null;
+  sortState = createDefaultSortState();
   pointOrder = createPointOrder(randomPool.point_count);
   rebuildSystemFromCurrentState();
   emitRenderCommands();
@@ -3405,6 +3841,9 @@ function load_randomPool(fullFilePath) {
     return;
   }
 
+  coordinateOverrides = null;
+  poolOverrides = null;
+  sortState = createDefaultSortState();
   pointOrder = createPointOrder(randomPool.point_count);
   rebuildSystemFromCurrentState();
   emitRenderCommands();
@@ -3444,6 +3883,7 @@ function save_view(viewId) {
     type: "lineBaseSystem.view",
     version: 1,
     transform_version: 1,
+    sort_version: 1,
     view_id: resolvedViewId,
     pool_id: currentPoolId,
     saved_at: new Date().toISOString(),
@@ -3460,6 +3900,7 @@ function save_view(viewId) {
     layer_spaces_by_id: captureLayerTransformSpaceState(),
     group_transforms_by_id: captureGroupTransformState(),
     group_spaces_by_id: captureGroupTransformSpaceState(),
+    sort_state: cloneSortState(sortState),
     selection: {
       layer_id: selectedLayerId,
       group_id: selectedGroupId,
@@ -3519,6 +3960,9 @@ function load_view(fullFilePath) {
   }
 
   selectedFormName = parsed.form;
+  coordinateOverrides = null;
+  poolOverrides = null;
+  sortState = sanitizeSortState(parsed.sort_state);
   pointOrder = parsed.point_order.slice();
   rebuildLinesFromCurrentOrder();
 
@@ -3613,6 +4057,10 @@ function load_view(fullFilePath) {
     applyLineWidthState(parsed.line_width_by_line_id);
   }
 
+  if (sortState.applied) {
+    applyCurrentSortStateToLines();
+  }
+
   emitLayerMenu();
 
   if (parsed.selection && parsed.selection.layer_id) {
@@ -3705,15 +4153,219 @@ function hide(targetType, targetId) {
   setVisible(targetType, targetId, false);
 }
 
-function reshuffle() {
+function reshuffleLines() {
   if (!randomPool) {
-    log("reshuffle requires generated data");
+    log("reshuffleLines requires generated data");
     return;
   }
 
   shufflePointOrder(pointOrder);
   rebuildSystemFromCurrentState();
   emitRenderCommands();
+}
+
+function reshuffleCoords() {
+  if (!randomPool) {
+    log("reshuffleCoords requires generated data");
+    return;
+  }
+
+  const source = getActiveCoordinates(randomPool);
+  const reshuffled = {
+    x: source.x.slice(),
+    y: source.y.slice(),
+    z: source.z.slice()
+  };
+
+  shufflePointOrder(reshuffled.x);
+  shufflePointOrder(reshuffled.y);
+  shufflePointOrder(reshuffled.z);
+
+  coordinateOverrides = reshuffled;
+  poolOverrides = null;
+
+  rebuildSystemFromCurrentState();
+  emitRenderCommands();
+  log("reshuffleCoords applied independent axis shuffle");
+}
+
+function reshuffleAll() {
+  if (!randomPool) {
+    log("reshuffleAll requires generated data");
+    return;
+  }
+
+  const reshuffledRandomValues = randomPool.random_values.slice();
+  shufflePointOrder(reshuffledRandomValues);
+
+  poolOverrides = buildRandomPoolFromValues(randomPool.line_count, reshuffledRandomValues);
+  coordinateOverrides = null;
+
+  rebuildSystemFromCurrentState();
+  emitRenderCommands();
+  outlet(0, "reshuffle_all_applied", randomPool.line_count, randomPool.random_count);
+  log("reshuffleAll applied full random-stream shuffle");
+}
+
+function sortAllNumbers(direction) {
+  if (!randomPool) {
+    log("sortAllNumbers requires generated data");
+    return;
+  }
+
+  const normalizedDirection = String(direction || "").toLowerCase();
+  if (normalizedDirection !== "asc" && normalizedDirection !== "desc") {
+    log("sortAllNumbers requires asc or desc");
+    return;
+  }
+
+  const sortedRandomValues = randomPool.random_values.slice();
+  sortedRandomValues.sort(function(a, b) {
+    return normalizedDirection === "asc" ? a - b : b - a;
+  });
+
+  poolOverrides = buildRandomPoolFromValues(randomPool.line_count, sortedRandomValues);
+  coordinateOverrides = null;
+
+  rebuildSystemFromCurrentState();
+  emitRenderCommands();
+  outlet(0, "sort_all_numbers_applied", normalizedDirection, randomPool.line_count, randomPool.random_count);
+  log("sortAllNumbers applied full random-stream sort " + normalizedDirection);
+}
+
+function setSortCoords(axis, mode, amount) {
+  if (!ensureSortDataAvailable("setSortCoords")) {
+    return;
+  }
+
+  const normalizedAxis = String(axis || "").toLowerCase();
+  const normalizedMode = String(mode || "").toLowerCase();
+
+  if (!isValidSortAxis(normalizedAxis)) {
+    log("setSortCoords axis must be x, y, z, or xyz");
+    return;
+  }
+
+  if (!isValidSortMode(normalizedMode)) {
+    log("setSortCoords mode must be asc or desc");
+    return;
+  }
+
+  sortState.coords.axis = normalizedAxis;
+  sortState.coords.mode = normalizedMode;
+  sortState.coords.amount = clampSortAmount(amount);
+  sortState.applied = 0;
+
+  outlet(0, "sort_set", "coords", sortState.coords.axis, sortState.coords.mode, sortState.coords.amount);
+}
+
+function setSortColors(channel, mode, amount) {
+  if (!ensureSortDataAvailable("setSortColors")) {
+    return;
+  }
+
+  const normalizedChannel = String(channel || "").toLowerCase();
+  const normalizedMode = String(mode || "").toLowerCase();
+
+  if (!isValidSortChannel(normalizedChannel)) {
+    log("setSortColors channel must be r, g, b, a, or rgba");
+    return;
+  }
+
+  if (!isValidSortMode(normalizedMode)) {
+    log("setSortColors mode must be asc or desc");
+    return;
+  }
+
+  sortState.colors.channel = normalizedChannel;
+  sortState.colors.mode = normalizedMode;
+  sortState.colors.amount = clampSortAmount(amount);
+  sortState.applied = 0;
+
+  outlet(0, "sort_set", "colors", sortState.colors.channel, sortState.colors.mode, sortState.colors.amount);
+}
+
+function setSortWidth(mode, amount) {
+  if (!ensureSortDataAvailable("setSortWidth")) {
+    return;
+  }
+
+  const normalizedMode = String(mode || "").toLowerCase();
+  if (!isValidSortMode(normalizedMode)) {
+    log("setSortWidth mode must be asc or desc");
+    return;
+  }
+
+  sortState.width.mode = normalizedMode;
+  sortState.width.amount = clampSortAmount(amount);
+  sortState.applied = 0;
+
+  outlet(0, "sort_set", "width", sortState.width.mode, sortState.width.amount);
+}
+
+function applySort() {
+  if (!ensureSortDataAvailable("applySort")) {
+    return;
+  }
+
+  applyCurrentSortStateToLines();
+  sortState.applied = hasActiveSortAmounts(sortState) ? 1 : 0;
+  emitRenderCommands();
+
+  outlet(0, "sort_applied");
+}
+
+function resetSort() {
+  if (!ensureSortDataAvailable("resetSort")) {
+    return;
+  }
+
+  sortState = createDefaultSortState();
+  applyCurrentSortStateToLines();
+  emitRenderCommands();
+
+  outlet(0, "sort_reset");
+}
+
+function getSortState() {
+  if (!ensureSortDataAvailable("getSortState")) {
+    return;
+  }
+
+  outlet(
+    0,
+    "sort_state",
+    sortState.coords.axis,
+    sortState.coords.mode,
+    sortState.coords.amount,
+    sortState.colors.channel,
+    sortState.colors.mode,
+    sortState.colors.amount,
+    sortState.width.mode,
+    sortState.width.amount,
+    sortState.applied ? 1 : 0
+  );
+}
+
+function reportSortRows() {
+  if (!ensureSortDataAvailable("reportSortRows")) {
+    return;
+  }
+
+  let rowCount = 0;
+
+  outlet(0, "sort_rows_begin");
+
+  outlet(0, "sort_row", "coords", sortState.coords.axis, sortState.coords.mode, sortState.coords.amount);
+  rowCount += 1;
+
+  outlet(0, "sort_row", "colors", sortState.colors.channel, sortState.colors.mode, sortState.colors.amount);
+  rowCount += 1;
+
+  outlet(0, "sort_row", "width", "width", sortState.width.mode, sortState.width.amount);
+  rowCount += 1;
+
+  outlet(0, "sort_rows_end", rowCount);
 }
 
 function reshuffleLineColors() {
@@ -4514,6 +5166,9 @@ function generate(numLines) {
 
   randomPool = deepFreezeObject(buildRandomPool(count));
   currentPoolId = null;
+  coordinateOverrides = null;
+  poolOverrides = null;
+  sortState = createDefaultSortState();
 
   if (!verifyPoolIsLocked(randomPool)) {
     log("randomPool lock failed");
