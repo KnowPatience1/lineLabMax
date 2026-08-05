@@ -260,6 +260,114 @@ function createLineBaseTransformMutations(config) {
     safeConfig.emit(0, "transform_space_set", "group", group.group_id, groupTransformSpacesById[group.group_id]);
   }
 
+  function setLinePosition(x, y, z) {
+    const line = safeConfig.getSelectedLineForTransformCommands();
+    if (!line) {
+      return;
+    }
+
+    safeConfig.ensureLineTransformSpace(line.id);
+
+    const px = parseTransformNumber(x);
+    const py = parseTransformNumber(y);
+    const pz = parseTransformNumber(z);
+    if (px === null || py === null || pz === null) {
+      safeConfig.log("setLinePosition requires finite numeric values");
+      return;
+    }
+
+    const transform = safeConfig.ensureLineTransform(line.id);
+    transform.position = [px, py, pz];
+    safeConfig.emitRenderCommands();
+    safeConfig.emit(0, "transform_set", "line", line.id);
+  }
+
+  function setLineRotation(x, y, z) {
+    const line = safeConfig.getSelectedLineForTransformCommands();
+    if (!line) {
+      return;
+    }
+
+    safeConfig.ensureLineTransformSpace(line.id);
+
+    const rx = parseTransformNumber(x);
+    const ry = parseTransformNumber(y);
+    const rz = parseTransformNumber(z);
+    if (rx === null || ry === null || rz === null) {
+      safeConfig.log("setLineRotation requires finite numeric values");
+      return;
+    }
+
+    const transform = safeConfig.ensureLineTransform(line.id);
+    transform.rotation = [rx, ry, rz];
+    safeConfig.emitRenderCommands();
+    safeConfig.emit(0, "transform_set", "line", line.id);
+  }
+
+  function setLineScale(x, y, z) {
+    const line = safeConfig.getSelectedLineForTransformCommands();
+    if (!line) {
+      return;
+    }
+
+    safeConfig.ensureLineTransformSpace(line.id);
+
+    const sx = parseTransformNumber(x);
+    const sy = parseTransformNumber(y);
+    const sz = parseTransformNumber(z);
+    if (sx === null || sy === null || sz === null || sx === 0 || sy === 0 || sz === 0) {
+      safeConfig.log("setLineScale requires non-zero numeric values");
+      return;
+    }
+
+    const transform = safeConfig.ensureLineTransform(line.id);
+    transform.scale = [sx, sy, sz];
+    safeConfig.emitRenderCommands();
+    safeConfig.emit(0, "transform_set", "line", line.id);
+  }
+
+  function setLineTransform(px, py, pz, rx, ry, rz, sx, sy, sz) {
+    const line = safeConfig.getSelectedLineForTransformCommands();
+    if (!line) {
+      return;
+    }
+
+    safeConfig.ensureLineTransformSpace(line.id);
+
+    const position = [parseTransformNumber(px), parseTransformNumber(py), parseTransformNumber(pz)];
+    const rotation = [parseTransformNumber(rx), parseTransformNumber(ry), parseTransformNumber(rz)];
+    const scale = [parseTransformNumber(sx), parseTransformNumber(sy), parseTransformNumber(sz)];
+
+    if (
+      position[0] === null || position[1] === null || position[2] === null ||
+      rotation[0] === null || rotation[1] === null || rotation[2] === null ||
+      scale[0] === null || scale[1] === null || scale[2] === null ||
+      scale[0] === 0 || scale[1] === 0 || scale[2] === 0
+    ) {
+      safeConfig.log("setLineTransform requires finite position/rotation and non-zero scale values");
+      return;
+    }
+
+    const transform = safeConfig.ensureLineTransform(line.id);
+    transform.position = position;
+    transform.rotation = rotation;
+    transform.scale = scale;
+    safeConfig.emitRenderCommands();
+    safeConfig.emit(0, "transform_set", "line", line.id);
+  }
+
+  function resetLineTransform() {
+    const line = safeConfig.getSelectedLineForTransformCommands();
+    if (!line) {
+      return;
+    }
+
+    const lineTransformsById = safeConfig.getLineTransformsById();
+    lineTransformsById[String(line.id)] = safeConfig.createIdentityTransform();
+    safeConfig.emitRenderCommands();
+    safeConfig.emit(0, "transform_reset", "line", line.id);
+  }
+
   function setScenePosition(x, y, z) {
     safeConfig.ensureSceneTransformSpace();
 
@@ -377,6 +485,15 @@ function createLineBaseTransformMutations(config) {
       groupTransformSpacesById[group.group_id] = safeConfig.TRANSFORM_SPACE_LOCAL;
     }
 
+    const lines = safeConfig.getLines();
+    const lineTransformsById = safeConfig.getLineTransformsById();
+    const lineTransformSpacesById = safeConfig.getLineTransformSpacesById();
+    for (let i = 0; i < lines.length; i += 1) {
+      const lineId = String(lines[i].id);
+      lineTransformsById[lineId] = safeConfig.createIdentityTransform();
+      lineTransformSpacesById[lineId] = safeConfig.TRANSFORM_SPACE_LOCAL;
+    }
+
     safeConfig.setSceneTransform(safeConfig.createIdentityTransform());
 
     safeConfig.emitRenderCommands();
@@ -396,6 +513,11 @@ function createLineBaseTransformMutations(config) {
     setGroupTransform: setGroupTransform,
     resetGroupTransform: resetGroupTransform,
     setGroupSpace: setGroupSpace,
+    setLinePosition: setLinePosition,
+    setLineRotation: setLineRotation,
+    setLineScale: setLineScale,
+    setLineTransform: setLineTransform,
+    resetLineTransform: resetLineTransform,
     setScenePosition: setScenePosition,
     setSceneRotation: setSceneRotation,
     setSceneScale: setSceneScale,

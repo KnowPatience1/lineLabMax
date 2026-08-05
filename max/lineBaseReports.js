@@ -150,6 +150,28 @@ function createLineBaseReports(config) {
     safeConfig.emit(0, "group_space", layerId, groupId, safeConfig.ensureGroupTransformSpace(groupId));
   }
 
+  function emitLineTransformRow(lineId) {
+    const transform = safeConfig.ensureLineTransform(lineId);
+    if (!transform) {
+      return;
+    }
+
+    safeConfig.emit(
+      0,
+      "line_transform",
+      lineId,
+      transform.position[0],
+      transform.position[1],
+      transform.position[2],
+      transform.rotation[0],
+      transform.rotation[1],
+      transform.rotation[2],
+      transform.scale[0],
+      transform.scale[1],
+      transform.scale[2]
+    );
+  }
+
   function emitSceneTransformRow() {
     const transform = safeConfig.ensureSceneTransform();
     const sceneSpace = safeConfig.ensureSceneTransformSpace();
@@ -185,6 +207,7 @@ function createLineBaseReports(config) {
     emitLayerSpaceRow: emitLayerSpaceRow,
     emitGroupTransformRow: emitGroupTransformRow,
     emitGroupSpaceRow: emitGroupSpaceRow,
+    emitLineTransformRow: emitLineTransformRow,
     emitSceneTransformRow: emitSceneTransformRow,
     emitSceneSpaceRow: emitSceneSpaceRow
   };

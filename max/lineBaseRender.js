@@ -4,7 +4,7 @@ function createLineBaseRender(config) {
   const safeConfig = config && typeof config === "object" ? config : {};
 
   function sketchWidth(lineWidth) {
-    return Math.max(2, Number(lineWidth) * 120);
+    return Math.max(1, Number(lineWidth) * 120);
   }
 
   function emitRenderCommands() {
@@ -50,9 +50,42 @@ function createLineBaseRender(config) {
     safeConfig.emit(0, "rendered", lines.length);
   }
 
+  function applyLineTransform(line, point) {
+    if (!line || !Array.isArray(point) || point.length !== 3) {
+      return point;
+    }
+
+    const lineTransform = safeConfig.ensureLineTransform(line.id);
+    if (!lineTransform) {
+      return point;
+    }
+
+    const lineSpace = safeConfig.ensureLineTransformSpace(line.id);
+    const lineStart = Array.isArray(line.base_start_coords) ? line.base_start_coords : line.start_coords;
+    const lineEnd = Array.isArray(line.base_end_coords) ? line.base_end_coords : line.end_coords;
+
+    if (
+      lineSpace === safeConfig.TRANSFORM_SPACE_LOCAL &&
+      Array.isArray(lineStart) &&
+      lineStart.length === 3 &&
+      Array.isArray(lineEnd) &&
+      lineEnd.length === 3
+    ) {
+      const linePivot = [
+        (Number(lineStart[0]) + Number(lineEnd[0])) / 2,
+        (Number(lineStart[1]) + Number(lineEnd[1])) / 2,
+        (Number(lineStart[2]) + Number(lineEnd[2])) / 2
+      ];
+      return safeConfig.applyTransformToPointAroundPivot(point, lineTransform, linePivot);
+    }
+
+    return safeConfig.applyTransformToPoint(point, lineTransform);
+  }
+
   return {
     sketchWidth: sketchWidth,
-    emitRenderCommands: emitRenderCommands
+    emitRenderCommands: emitRenderCommands,
+    applyLineTransform: applyLineTransform
   };
 }
 

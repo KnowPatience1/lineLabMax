@@ -285,6 +285,34 @@ function createLineBaseValidators(config) {
       }
     }
 
+    if (typeof payload.line_transforms_by_id !== "undefined") {
+      if (!payload.line_transforms_by_id || typeof payload.line_transforms_by_id !== "object") {
+        return false;
+      }
+
+      const lineTransformKeys = Object.keys(payload.line_transforms_by_id);
+      for (let i = 0; i < lineTransformKeys.length; i += 1) {
+        const key = lineTransformKeys[i];
+        if (!isValidTransformEntry(payload.line_transforms_by_id[key], false)) {
+          return false;
+        }
+      }
+    }
+
+    if (typeof payload.line_spaces_by_id !== "undefined") {
+      if (!payload.line_spaces_by_id || typeof payload.line_spaces_by_id !== "object") {
+        return false;
+      }
+
+      const lineSpaceKeys = Object.keys(payload.line_spaces_by_id);
+      for (let i = 0; i < lineSpaceKeys.length; i += 1) {
+        const key = lineSpaceKeys[i];
+        if (!isValidSceneTransformSpaceValue(payload.line_spaces_by_id[key])) {
+          return false;
+        }
+      }
+    }
+
     if (typeof payload.scene_transform !== "undefined") {
       if (!isValidTransformEntry(payload.scene_transform, false)) {
         return false;

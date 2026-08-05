@@ -129,6 +129,32 @@ function createLineBaseStateHelpers(config) {
     return output;
   }
 
+  function captureLineTransformState() {
+    const output = {};
+    const lineTransformsById = safeConfig.getLineTransformsById();
+    const keys = Object.keys(lineTransformsById || {});
+
+    for (let i = 0; i < keys.length; i += 1) {
+      const key = keys[i];
+      output[key] = safeConfig.cloneTransform(safeConfig.normalizeTransform(lineTransformsById[key]));
+    }
+
+    return output;
+  }
+
+  function captureLineTransformSpaceState() {
+    const output = {};
+    const lineTransformSpacesById = safeConfig.getLineTransformSpacesById();
+    const keys = Object.keys(lineTransformSpacesById || {});
+
+    for (let i = 0; i < keys.length; i += 1) {
+      const key = keys[i];
+      output[key] = safeConfig.ensureLineTransformSpace(key);
+    }
+
+    return output;
+  }
+
   function captureSceneTransformState() {
     return safeConfig.cloneTransform(safeConfig.ensureSceneTransform());
   }
@@ -218,6 +244,45 @@ function createLineBaseStateHelpers(config) {
     }
   }
 
+  function applyLineTransformState(stateById) {
+    if (!stateById || typeof stateById !== "object") {
+      return;
+    }
+
+    const lineTransformsById = safeConfig.getLineTransformsById();
+    const keys = Object.keys(stateById);
+    for (let i = 0; i < keys.length; i += 1) {
+      const lineId = keys[i];
+      if (!lineTransformsById[lineId]) {
+        continue;
+      }
+
+      if (safeConfig.isValidTransformEntry(stateById[lineId], false)) {
+        lineTransformsById[lineId] = safeConfig.normalizeTransform(stateById[lineId]);
+      }
+    }
+  }
+
+  function applyLineTransformSpaceState(stateById) {
+    if (!stateById || typeof stateById !== "object") {
+      return;
+    }
+
+    const lineTransformsById = safeConfig.getLineTransformsById();
+    const lineTransformSpacesById = safeConfig.getLineTransformSpacesById();
+    const keys = Object.keys(stateById);
+    for (let i = 0; i < keys.length; i += 1) {
+      const lineId = keys[i];
+      if (!lineTransformsById[lineId]) {
+        continue;
+      }
+
+      if (safeConfig.isValidSceneTransformSpaceValue(stateById[lineId])) {
+        lineTransformSpacesById[lineId] = safeConfig.normalizeSceneTransformSpace(stateById[lineId]);
+      }
+    }
+  }
+
   function applySceneTransformState(state) {
     if (!state || typeof state !== "object") {
       return;
@@ -235,12 +300,16 @@ function createLineBaseStateHelpers(config) {
     captureLayerTransformSpaceState: captureLayerTransformSpaceState,
     captureGroupTransformState: captureGroupTransformState,
     captureGroupTransformSpaceState: captureGroupTransformSpaceState,
+    captureLineTransformState: captureLineTransformState,
+    captureLineTransformSpaceState: captureLineTransformSpaceState,
     captureSceneTransformState: captureSceneTransformState,
     captureSceneTransformSpaceState: captureSceneTransformSpaceState,
     applyLayerTransformState: applyLayerTransformState,
     applyLayerTransformSpaceState: applyLayerTransformSpaceState,
     applyGroupTransformState: applyGroupTransformState,
     applyGroupTransformSpaceState: applyGroupTransformSpaceState,
+    applyLineTransformState: applyLineTransformState,
+    applyLineTransformSpaceState: applyLineTransformSpaceState,
     applySceneTransformState: applySceneTransformState
   };
 }

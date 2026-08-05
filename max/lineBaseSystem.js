@@ -210,6 +210,30 @@ Purpose: Resets currently selected group transform to identity.
 Syntax: getGroupTransform
 Purpose: Emits the currently selected group transform.
 
+45a. setLinePosition x y z
+Syntax: setLinePosition 0.0 0.0 0.0
+Purpose: Sets position transform for the currently selected line.
+
+45b. setLineRotation x y z
+Syntax: setLineRotation 0 0 15
+Purpose: Sets rotation transform (degrees) for the currently selected line.
+
+45c. setLineScale x y z
+Syntax: setLineScale 1 1 1
+Purpose: Sets scale transform for the currently selected line.
+
+45d. setLineTransform px py pz rx ry rz sx sy sz
+Syntax: setLineTransform 0 0 0 0 0 0 1 1 1
+Purpose: Sets full transform for the currently selected line.
+
+45e. resetLineTransform
+Syntax: resetLineTransform
+Purpose: Resets currently selected line transform to identity.
+
+45f. getLineTransform
+Syntax: getLineTransform
+Purpose: Emits the currently selected line transform.
+
 46. setGroupSpace mode
 Syntax: setGroupSpace local
 Syntax: setGroupSpace world
@@ -245,7 +269,7 @@ Purpose: Emits current scene transform.
 
 54. reportTransforms
 Syntax: reportTransforms
-Purpose: Emits scene/layer/group transforms in a table-style stream.
+Purpose: Emits scene/layer/group/line transforms in a table-style stream.
 
 55. resetAllTransforms
 Syntax: resetAllTransforms
@@ -347,6 +371,16 @@ Group transform outlet messages:
 - transform_space_set group groupId local|world
   Emitted by setGroupSpace.
 
+Line transform outlet messages:
+- line_transform lineId px py pz rx ry rz sx sy sz
+  Emitted by getLineTransform.
+- line_transform_row lineId px py pz rx ry rz sx sy sz
+  Emitted by reportTransforms between transforms_begin and transforms_end.
+- transform_set line lineId
+  Emitted by setLinePosition, setLineRotation, setLineScale, setLineTransform.
+- transform_reset line lineId
+  Emitted by resetLineTransform.
+
 Sort outlet messages:
 - sort_set coords axis mode amount
   Emitted by setSortCoords.
@@ -441,6 +475,8 @@ let layerTransformsById = {};
 let layerTransformSpacesById = {};
 let groupTransformsById = {};
 let groupTransformSpacesById = {};
+let lineTransformsById = {};
+let lineTransformSpacesById = {};
 // declare a cache object for named objects. This will be used to store references to Max objects by name for faster access.
 const namedObjectCache = {};
 // declare a configuration object for hierarchy ranges. This will hold the min and max values for layer count, groups per layer, and lines per group.
@@ -580,6 +616,9 @@ const lineBaseStateHelpers = lineBaseStateHelpersModule.createLineBaseStateHelpe
   ensureGroupTransformSpace: function(groupId) {
     return ensureGroupTransformSpace(groupId);
   },
+  ensureLineTransformSpace: function(lineId) {
+    return ensureLineTransformSpace(lineId);
+  },
   ensureSceneTransform: function() {
     return ensureSceneTransform();
   },
@@ -606,6 +645,12 @@ const lineBaseStateHelpers = lineBaseStateHelpersModule.createLineBaseStateHelpe
   },
   getGroupTransformSpacesById: function() {
     return groupTransformSpacesById;
+  },
+  getLineTransformsById: function() {
+    return lineTransformsById;
+  },
+  getLineTransformSpacesById: function() {
+    return lineTransformSpacesById;
   },
   setSceneTransform: function(value) {
     sceneTransform = value;
@@ -639,6 +684,9 @@ const lineBaseReports = lineBaseReportsModule.createLineBaseReports({
   },
   ensureGroupTransform: function(groupId, layerId) {
     return ensureGroupTransform(groupId, layerId);
+  },
+  ensureLineTransform: function(lineId) {
+    return ensureLineTransform(lineId);
   },
   ensureGroupTransformSpace: function(groupId) {
     return ensureGroupTransformSpace(groupId);
@@ -685,6 +733,12 @@ const lineBaseRender = lineBaseRenderModule.createLineBaseRender({
   applyTransformToPoint: function(point, transform) {
     return applyTransformToPoint(point, transform);
   },
+  ensureLineTransform: function(lineId) {
+    return ensureLineTransform(lineId);
+  },
+  ensureLineTransformSpace: function(lineId) {
+    return ensureLineTransformSpace(lineId);
+  },
   TRANSFORM_SPACE_LOCAL: TRANSFORM_SPACE_LOCAL
 });
 
@@ -704,6 +758,9 @@ const lineBaseTransformMutations = lineBaseTransformMutationsModule.createLineBa
   getSelectedGroupForTransformCommands: function() {
     return getSelectedGroupForTransformCommands();
   },
+  getSelectedLineForTransformCommands: function() {
+    return getSelectedLineForTransformCommands();
+  },
   ensureLayerTransformSpace: function(layerId) {
     return ensureLayerTransformSpace(layerId);
   },
@@ -718,6 +775,12 @@ const lineBaseTransformMutations = lineBaseTransformMutationsModule.createLineBa
   },
   ensureGroupTransform: function(groupId, layerId) {
     return ensureGroupTransform(groupId, layerId);
+  },
+  ensureLineTransform: function(lineId) {
+    return ensureLineTransform(lineId);
+  },
+  ensureLineTransformSpace: function(lineId) {
+    return ensureLineTransformSpace(lineId);
   },
   ensureSceneTransform: function() {
     return ensureSceneTransform();
@@ -742,6 +805,15 @@ const lineBaseTransformMutations = lineBaseTransformMutationsModule.createLineBa
   },
   getGroupTransformSpacesById: function() {
     return groupTransformSpacesById;
+  },
+  getLineTransformsById: function() {
+    return lineTransformsById;
+  },
+  getLineTransformSpacesById: function() {
+    return lineTransformSpacesById;
+  },
+  getLines: function() {
+    return lines;
   },
   getHierarchy: function() {
     return hierarchy;
@@ -837,6 +909,8 @@ bindRuntimeStateProperty("layerTransformsById", function() { return layerTransfo
 bindRuntimeStateProperty("layerTransformSpacesById", function() { return layerTransformSpacesById; }, function(value) { layerTransformSpacesById = value; });
 bindRuntimeStateProperty("groupTransformsById", function() { return groupTransformsById; }, function(value) { groupTransformsById = value; });
 bindRuntimeStateProperty("groupTransformSpacesById", function() { return groupTransformSpacesById; }, function(value) { groupTransformSpacesById = value; });
+bindRuntimeStateProperty("lineTransformsById", function() { return lineTransformsById; }, function(value) { lineTransformsById = value; });
+bindRuntimeStateProperty("lineTransformSpacesById", function() { return lineTransformSpacesById; }, function(value) { lineTransformSpacesById = value; });
 bindRuntimeStateProperty("namedObjectCache", function() { return namedObjectCache; }, function() {});
 bindRuntimeStateProperty("hierarchyRangeConfig", function() { return hierarchyRangeConfig; }, function() {});
 
@@ -907,7 +981,7 @@ function buildRandomPoolFromValues(lineCount, randomValues) {
     attributes.a.push(mapToRange(randomValues[cursor], 0.1, 1.0)); //original was 0.25 to 1.0, but changed to 0.1 to 1.0 for more variety
     cursor += 1;
 
-    attributes.line_width.push(mapToRange(randomValues[cursor], 0.01, 0.04));
+    attributes.line_width.push(mapToRange(randomValues[cursor], 0.005, 0.5));
     cursor += 1;
   }
 
@@ -976,6 +1050,20 @@ function ensureGroupTransformSpace(groupId) {
 
   groupTransformSpacesById[key] = normalizeSceneTransformSpace(groupTransformSpacesById[key]);
   return groupTransformSpacesById[key];
+}
+
+function ensureLineTransformSpace(lineId) {
+  const key = String(lineId || "");
+  if (key.length === 0) {
+    return TRANSFORM_SPACE_LOCAL;
+  }
+
+  if (!lineTransformSpacesById[key]) {
+    lineTransformSpacesById[key] = TRANSFORM_SPACE_LOCAL;
+  }
+
+  lineTransformSpacesById[key] = normalizeSceneTransformSpace(lineTransformSpacesById[key]);
+  return lineTransformSpacesById[key];
 }
 
 function isValidLoadedViewPayload(payload) {
@@ -1155,6 +1243,20 @@ function ensureGroupTransform(groupId, layerId) {
   return groupTransformsById[key];
 }
 
+function ensureLineTransform(lineId) {
+  const key = String(lineId || "");
+  if (key.length === 0) {
+    return null;
+  }
+
+  if (!lineTransformsById[key]) {
+    lineTransformsById[key] = createIdentityTransform();
+  }
+
+  lineTransformsById[key] = normalizeTransform(lineTransformsById[key]);
+  return lineTransformsById[key];
+}
+
 function ensureSceneTransform() {
   sceneTransform = normalizeTransform(sceneTransform);
   return sceneTransform;
@@ -1166,6 +1268,8 @@ function reconcileTransformState() {
     layerTransformSpacesById = {};
     groupTransformsById = {};
     groupTransformSpacesById = {};
+    lineTransformsById = {};
+    lineTransformSpacesById = {};
     return;
   }
 
@@ -1173,6 +1277,8 @@ function reconcileTransformState() {
   const nextLayerTransformSpaces = {};
   const nextGroupTransforms = {};
   const nextGroupTransformSpaces = {};
+  const nextLineTransforms = {};
+  const nextLineTransformSpaces = {};
 
   for (let i = 0; i < hierarchy.layers.length; i += 1) {
     const layer = hierarchy.layers[i];
@@ -1198,10 +1304,19 @@ function reconcileTransformState() {
     nextGroupTransformSpaces[groupId] = ensureGroupTransformSpace(groupId);
   }
 
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const lineId = String(line.id);
+    nextLineTransforms[lineId] = normalizeTransform(lineTransformsById[lineId]);
+    nextLineTransformSpaces[lineId] = ensureLineTransformSpace(lineId);
+  }
+
   layerTransformsById = nextLayerTransforms;
   layerTransformSpacesById = nextLayerTransformSpaces;
   groupTransformsById = nextGroupTransforms;
   groupTransformSpacesById = nextGroupTransformSpaces;
+  lineTransformsById = nextLineTransforms;
+  lineTransformSpacesById = nextLineTransformSpaces;
 }
 
 function captureLayerTransformState() {
@@ -1218,6 +1333,14 @@ function captureGroupTransformState() {
 
 function captureGroupTransformSpaceState() {
   return lineBaseStateHelpers.captureGroupTransformSpaceState();
+}
+
+function captureLineTransformState() {
+  return lineBaseStateHelpers.captureLineTransformState();
+}
+
+function captureLineTransformSpaceState() {
+  return lineBaseStateHelpers.captureLineTransformSpaceState();
 }
 
 function captureSceneTransformState() {
@@ -1242,6 +1365,14 @@ function applyGroupTransformState(stateById) {
 
 function applyGroupTransformSpaceState(stateById) {
   lineBaseStateHelpers.applyGroupTransformSpaceState(stateById);
+}
+
+function applyLineTransformState(stateById) {
+  lineBaseStateHelpers.applyLineTransformState(stateById);
+}
+
+function applyLineTransformSpaceState(stateById) {
+  lineBaseStateHelpers.applyLineTransformSpaceState(stateById);
 }
 
 function applySceneTransformState(state) {
@@ -1405,7 +1536,10 @@ function computeGroupRenderPivotPoints() {
 
     const baseStart = Array.isArray(line.base_start_coords) ? line.base_start_coords : line.start_coords;
     const baseEnd = Array.isArray(line.base_end_coords) ? line.base_end_coords : line.end_coords;
-    const points = [baseStart, baseEnd];
+    const points = [
+      lineBaseRender.applyLineTransform(line, baseStart),
+      lineBaseRender.applyLineTransform(line, baseEnd)
+    ];
     const groupBounds = boundsByGroupId[groupId];
 
     for (let j = 0; j < points.length; j += 1) {
@@ -1483,8 +1617,8 @@ function computeLayerRenderPivotPoints(groupPivotsById) {
       : null;
     const baseStart = Array.isArray(line.base_start_coords) ? line.base_start_coords : line.start_coords;
     const baseEnd = Array.isArray(line.base_end_coords) ? line.base_end_coords : line.end_coords;
-    let drawStart = Array.isArray(baseStart) ? baseStart.slice() : null;
-    let drawEnd = Array.isArray(baseEnd) ? baseEnd.slice() : null;
+    let drawStart = lineBaseRender.applyLineTransform(line, baseStart);
+    let drawEnd = lineBaseRender.applyLineTransform(line, baseEnd);
 
     if (drawStart && groupTransform) {
       drawStart = groupSpace === TRANSFORM_SPACE_LOCAL && groupPivot
@@ -1538,7 +1672,7 @@ function transformedLineEndpoint(line, point, groupPivotsById, layerPivotsById) 
     return point;
   }
 
-  let transformed = point.slice();
+  let transformed = lineBaseRender.applyLineTransform(line, point);
 
   const group = getHierarchyGroupById(line.group_id);
   const groupTransform = group && groupTransformsById[group.group_id]
@@ -2006,7 +2140,7 @@ function buildRandomPool(lineCount) {
     attributes.a.push(mapToRange(randomValues[cursor], 0.1, 1.0));
     cursor += 1;
 
-    attributes.line_width.push(mapToRange(randomValues[cursor], 0.01, 0.04));
+    attributes.line_width.push(mapToRange(randomValues[cursor], 0.005, 0.5));
     cursor += 1;
   }
 
@@ -2985,6 +3119,8 @@ function save_view(viewId) {
     layer_spaces_by_id: captureLayerTransformSpaceState(),
     group_transforms_by_id: captureGroupTransformState(),
     group_spaces_by_id: captureGroupTransformSpaceState(),
+    line_transforms_by_id: captureLineTransformState(),
+    line_spaces_by_id: captureLineTransformSpaceState(),
     sort_state: cloneSortState(sortState),
     selection: {
       layer_id: selectedLayerId,
@@ -3106,6 +3242,7 @@ function load_view(fullFilePath) {
   sceneTransformSpace = TRANSFORM_SPACE_LOCAL;
   layerTransformSpacesById = {};
   groupTransformSpacesById = {};
+  lineTransformSpacesById = {};
 
   if (parsed.layer_transforms_by_id && typeof parsed.layer_transforms_by_id === "object") {
     applyLayerTransformState(parsed.layer_transforms_by_id);
@@ -3121,6 +3258,14 @@ function load_view(fullFilePath) {
 
   if (parsed.group_spaces_by_id && typeof parsed.group_spaces_by_id === "object") {
     applyGroupTransformSpaceState(parsed.group_spaces_by_id);
+  }
+
+  if (parsed.line_transforms_by_id && typeof parsed.line_transforms_by_id === "object") {
+    applyLineTransformState(parsed.line_transforms_by_id);
+  }
+
+  if (parsed.line_spaces_by_id && typeof parsed.line_spaces_by_id === "object") {
+    applyLineTransformSpaceState(parsed.line_spaces_by_id);
   }
 
   if (parsed.scene_transform && typeof parsed.scene_transform === "object") {
@@ -3525,6 +3670,26 @@ function getSelectedGroupForTransformCommands() {
   return group;
 }
 
+function getSelectedLineForTransformCommands() {
+  if (!lines || lines.length === 0) {
+    log("transform command requires generated data");
+    return null;
+  }
+
+  if (selectedLineId === null || typeof selectedLineId === "undefined") {
+    log("transform command requires selected line");
+    return null;
+  }
+
+  const line = getLineById(Number(selectedLineId));
+  if (!line) {
+    log("transform command unknown selected line " + selectedLineId);
+    return null;
+  }
+
+  return line;
+}
+
 function emitLayerTransformRow(layerId) {
   lineBaseReports.emitLayerTransformRow(layerId);
 }
@@ -3539,6 +3704,10 @@ function emitGroupTransformRow(groupId, layerId) {
 
 function emitGroupSpaceRow(groupId, layerId) {
   lineBaseReports.emitGroupSpaceRow(groupId, layerId);
+}
+
+function emitLineTransformRow(lineId) {
+  lineBaseReports.emitLineTransformRow(lineId);
 }
 
 function emitSceneTransformRow() {
@@ -3632,6 +3801,35 @@ function getGroupSpace() {
   }
 
   emitGroupSpaceRow(group.group_id, group.layer_id);
+}
+
+function setLinePosition(x, y, z) {
+  lineBaseTransformMutations.setLinePosition(x, y, z);
+}
+
+function setLineRotation(x, y, z) {
+  lineBaseTransformMutations.setLineRotation(x, y, z);
+}
+
+function setLineScale(x, y, z) {
+  lineBaseTransformMutations.setLineScale(x, y, z);
+}
+
+function setLineTransform(px, py, pz, rx, ry, rz, sx, sy, sz) {
+  lineBaseTransformMutations.setLineTransform(px, py, pz, rx, ry, rz, sx, sy, sz);
+}
+
+function resetLineTransform() {
+  lineBaseTransformMutations.resetLineTransform();
+}
+
+function getLineTransform() {
+  const line = getSelectedLineForTransformCommands();
+  if (!line) {
+    return;
+  }
+
+  emitLineTransformRow(line.id);
 }
 
 function setScenePosition(x, y, z) {
@@ -3758,6 +3956,30 @@ function reportTransforms() {
       transform.scale[1],
       transform.scale[2],
       groupSpace
+    );
+    rowCount += 1;
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const transform = ensureLineTransform(line.id);
+    if (!transform) {
+      continue;
+    }
+
+    outlet(
+      0,
+      "line_transform_row",
+      line.id,
+      transform.position[0],
+      transform.position[1],
+      transform.position[2],
+      transform.rotation[0],
+      transform.rotation[1],
+      transform.rotation[2],
+      transform.scale[0],
+      transform.scale[1],
+      transform.scale[2]
     );
     rowCount += 1;
   }
