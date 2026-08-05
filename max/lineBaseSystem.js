@@ -907,7 +907,7 @@ function buildRandomPoolFromValues(lineCount, randomValues) {
     attributes.a.push(mapToRange(randomValues[cursor], 0.1, 1.0)); //original was 0.25 to 1.0, but changed to 0.1 to 1.0 for more variety
     cursor += 1;
 
-    attributes.line_width.push(mapToRange(randomValues[cursor], 0.005, 10.5)); //original was 0.01 to 0.04, but changed to 0.005 to 0.5 for more variety
+    attributes.line_width.push(mapToRange(randomValues[cursor], 0.01, 0.04));
     cursor += 1;
   }
 
@@ -2003,7 +2003,7 @@ function buildRandomPool(lineCount) {
     cursor += 1;
     attributes.b.push(randomValues[cursor]);
     cursor += 1;
-    attributes.a.push(mapToRange(randomValues[cursor], 0.25, 1.0));
+    attributes.a.push(mapToRange(randomValues[cursor], 0.1, 1.0));
     cursor += 1;
 
     attributes.line_width.push(mapToRange(randomValues[cursor], 0.01, 0.04));
