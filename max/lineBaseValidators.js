@@ -227,6 +227,28 @@ function createLineBaseValidators(config) {
           return false;
         }
       }
+
+      if (typeof payload.render_settings.linewidth_range !== "undefined") {
+        const lineWidthRange = payload.render_settings.linewidth_range;
+        if (
+          !Array.isArray(lineWidthRange) ||
+          lineWidthRange.length !== 2 ||
+          !isFinite(Number(lineWidthRange[0])) ||
+          !isFinite(Number(lineWidthRange[1])) ||
+          Number(lineWidthRange[0]) <= 0 ||
+          Number(lineWidthRange[1]) <= 0 ||
+          Number(lineWidthRange[0]) >= Number(lineWidthRange[1])
+        ) {
+          return false;
+        }
+      }
+
+      if (typeof payload.render_settings.linewidth_multiplier !== "undefined") {
+        const lineWidthMultiplier = Number(payload.render_settings.linewidth_multiplier);
+        if (!isFinite(lineWidthMultiplier) || lineWidthMultiplier <= 0) {
+          return false;
+        }
+      }
     }
 
     if (typeof payload.transform_version !== "undefined") {

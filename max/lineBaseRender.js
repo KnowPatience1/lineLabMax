@@ -3,8 +3,20 @@
 function createLineBaseRender(config) {
   const safeConfig = config && typeof config === "object" ? config : {};
 
-  function sketchWidth(lineWidth) {
-    return Math.max(1, Number(lineWidth) * 120);
+  const DEFAULT_LINE_WIDTH_MULTIPLIER = 120;
+
+  function normalizeLineWidthMultiplier(candidate) {
+    const numeric = Number(candidate);
+    if (!isFinite(numeric) || numeric <= 0) {
+      return DEFAULT_LINE_WIDTH_MULTIPLIER;
+    }
+
+    return numeric;
+  }
+
+  function sketchWidth(lineWidth, lineWidthMultiplier) {
+    const multiplier = normalizeLineWidthMultiplier(lineWidthMultiplier);
+    return Math.max(1, Number(lineWidth) * multiplier);
   }
 
   function normalizeEraseColor(candidate) {
@@ -30,6 +42,7 @@ function createLineBaseRender(config) {
   function emitRenderCommands() {
     const renderSettings = safeConfig.getRenderSettings ? safeConfig.getRenderSettings() : {};
     const eraseColor = normalizeEraseColor(renderSettings && renderSettings.eraseColor);
+    const lineWidthMultiplier = normalizeLineWidthMultiplier(renderSettings && renderSettings.lineWidthMultiplier);
 
     safeConfig.emit(0, "erase_color", eraseColor[0], eraseColor[1], eraseColor[2], eraseColor[3]);
     safeConfig.emit(0, "sketch", "reset");
@@ -64,7 +77,7 @@ function createLineBaseRender(config) {
         : drawEnd;
 
       safeConfig.emit(0, "sketch", "glcolor", line.color[0], line.color[1], line.color[2], line.color[3]);
-      safeConfig.emit(0, "sketch", "gllinewidth", sketchWidth(line.line_width));
+      safeConfig.emit(0, "sketch", "gllinewidth", sketchWidth(line.line_width, lineWidthMultiplier));
       safeConfig.emit(0, "sketch", "moveto", sceneStart[0], sceneStart[1], sceneStart[2]);
       safeConfig.emit(0, "sketch", "lineto", sceneEnd[0], sceneEnd[1], sceneEnd[2]);
     }

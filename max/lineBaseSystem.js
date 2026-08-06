@@ -3,7 +3,8 @@
 
 1. generate numLines  
 Syntax: generate 120  
-Purpose: Generates and freezes the random pool, builds lines, builds hierarchy, and renders.
+Purpose: Generates and freezes the random pool, assigns a pool id, builds lines, builds hierarchy, and renders.
+Emits: pool_id idValue immediately after generation.
 
 2. reshuffleLines  
 Syntax: reshuffleLines  
@@ -90,9 +91,28 @@ Purpose: Sets the erase color used by the system.
 Syntax: get_erase_color
 Purpose: Emits the current erase color as: erase_color r g b a.
 
+14c. set_linewidth_range min_width max_width
+Syntax: set_linewidth_range 0.005 0.5
+Purpose: Sets generated line-width range (min/max) used for pool builds.
+  Emits linewidth min max on success.
+
+14d. get_linewidth_range
+Syntax: get_linewidth_range
+Purpose: Emits current generated line-width range as: linewidth min max.
+
+14e. set_linewidth_multiplier multiplier
+Syntax: set_linewidth_multiplier 120
+Purpose: Sets render-time line-width multiplier used for sketch gllinewidth.
+  Emits linewidth_multiplier value on success.
+
+14f. get_linewidth_multiplier
+Syntax: get_linewidth_multiplier
+Purpose: Emits current render-time line-width multiplier as: linewidth_multiplier value.
+
 15. save_randomPool
 Syntax: save_randomPool
 Purpose: Saves immutable pool-only data to pathName using a timestamped filename: randomPool_hh-mm-ss.json.
+Pool id behavior: reuses current pool_id when already set, otherwise creates one.
 
 16. load_randomPool fullFilePath
 Syntax: load_randomPool /full/path/randomPool_12-30-45.json
@@ -108,7 +128,7 @@ Purpose: Loads mutable view state for the currently loaded pool and applies exac
 
 19. get_poolId
 Syntax: get_poolId
-Purpose: Emits the current pool id as: pool_id idValue. Emits an empty string when no pool is currently linked.
+Purpose: Emits the current pool id as: pool_id idValue. Logs when no pool_id is currently set.
 
 20. list_views_for_pool poolId
 Syntax: list_views_for_pool pool_2026-07-27_12-30-45
@@ -242,6 +262,10 @@ Purpose: Resets currently selected line transform to identity.
 45f. getLineTransform
 Syntax: getLineTransform
 Purpose: Emits the currently selected line transform.
+
+45g selectLine 
+Syntax: selectLine lineId
+Purpose: Selects a line by id and updates the current_line menu selection.
 
 46. setGroupSpace mode
 Syntax: setGroupSpace local
@@ -413,6 +437,12 @@ Sort outlet messages:
 Erase color outlet messages:
 - erase_color r g b a
   Emitted by get_erase_color.
+
+Line width outlet messages:
+- linewidth min max
+  Emitted by set_linewidth_range, get_linewidth_range, and load_view.
+- linewidth_multiplier value
+  Emitted by set_linewidth_multiplier, get_linewidth_multiplier, and load_view.
 */
 
 "use strict";
@@ -449,6 +479,9 @@ const SORT_CHANNEL_B = "b";
 const SORT_CHANNEL_A = "a";
 const SORT_CHANNEL_RGBA = "rgba";
 const DEFAULT_ERASE_COLOR = [0, 0, 0, 1];
+const DEFAULT_LINE_WIDTH_RANGE_MIN = 0.005;
+const DEFAULT_LINE_WIDTH_RANGE_MAX = 0.5;
+const DEFAULT_LINE_WIDTH_MULTIPLIER = 120;
 const lineBaseValidators = lineBaseValidatorModule.createLineBaseValidators({
   RANDOMS_PER_POINT: RANDOMS_PER_POINT,
   TRANSFORM_SPACE_LOCAL: TRANSFORM_SPACE_LOCAL,
@@ -477,6 +510,9 @@ let selectedGroupId = null;
 let selectedLineId = null;
 let pathName = "unset";
 let eraseColor = DEFAULT_ERASE_COLOR.slice();
+let lineWidthRangeMin = DEFAULT_LINE_WIDTH_RANGE_MIN;
+let lineWidthRangeMax = DEFAULT_LINE_WIDTH_RANGE_MAX;
+let lineWidthMultiplier = DEFAULT_LINE_WIDTH_MULTIPLIER;
 let currentPoolId = null;
 let loadedIndexData = null;
 let loadedIndexPath = "";
@@ -520,8 +556,70 @@ const runtime = {
       return post(message);
     },
     getNamedObject: function(objectName) {
-      if (typeof patcher === "object" && patcher && typeof patcher.getnamed === "function") {
-        return patcher.getnamed(objectName);
+      const resolvedName = String(objectName || "");
+      if (resolvedName.length === 0) {
+        return null;
+      }
+
+      function tryGetNamedFromPatcher(targetPatcher) {
+        if (!targetPatcher || typeof targetPatcher.getnamed !== "function") {
+          return null;
+        }
+
+        try {
+          const namedObject = targetPatcher.getnamed(resolvedName);
+          if (namedObject && typeof namedObject.message === "function") {
+            return namedObject;
+          }
+        } catch (error) {
+          // Ignore and continue searching parent patchers.
+        }
+
+        return null;
+      }
+
+      const visitedPatchers = [];
+      let currentPatcher = (typeof patcher === "object" && patcher) ? patcher : null;
+      let depth = 0;
+      const maxDepth = 16;
+
+      while (currentPatcher && depth < maxDepth) {
+        const namedObject = tryGetNamedFromPatcher(currentPatcher);
+        if (namedObject) {
+          return namedObject;
+        }
+
+        visitedPatchers.push(currentPatcher);
+
+        let parent = null;
+        try {
+          if (typeof currentPatcher.parentpatcher === "function") {
+            parent = currentPatcher.parentpatcher();
+          } else if (typeof currentPatcher.parentpatcher === "object") {
+            parent = currentPatcher.parentpatcher;
+          }
+        } catch (error) {
+          parent = null;
+        }
+
+        if (!parent) {
+          break;
+        }
+
+        let isVisited = false;
+        for (let i = 0; i < visitedPatchers.length; i += 1) {
+          if (visitedPatchers[i] === parent) {
+            isVisited = true;
+            break;
+          }
+        }
+
+        if (isVisited) {
+          break;
+        }
+
+        currentPatcher = parent;
+        depth += 1;
       }
 
       return null;
@@ -720,7 +818,8 @@ const lineBaseRender = lineBaseRenderModule.createLineBaseRender({
   },
   getRenderSettings: function() {
     return {
-      eraseColor: eraseColor.slice()
+      eraseColor: eraseColor.slice(),
+      lineWidthMultiplier: Number(lineWidthMultiplier)
     };
   },
   getLines: function() {
@@ -921,6 +1020,9 @@ bindRuntimeStateProperty("selectedGroupId", function() { return selectedGroupId;
 bindRuntimeStateProperty("selectedLineId", function() { return selectedLineId; }, function(value) { selectedLineId = value; });
 bindRuntimeStateProperty("pathName", function() { return pathName; }, function(value) { pathName = value; });
 bindRuntimeStateProperty("eraseColor", function() { return eraseColor; }, function(value) { eraseColor = value; });
+bindRuntimeStateProperty("lineWidthRangeMin", function() { return lineWidthRangeMin; }, function(value) { lineWidthRangeMin = value; });
+bindRuntimeStateProperty("lineWidthRangeMax", function() { return lineWidthRangeMax; }, function(value) { lineWidthRangeMax = value; });
+bindRuntimeStateProperty("lineWidthMultiplier", function() { return lineWidthMultiplier; }, function(value) { lineWidthMultiplier = value; });
 bindRuntimeStateProperty("currentPoolId", function() { return currentPoolId; }, function(value) { currentPoolId = value; });
 bindRuntimeStateProperty("loadedIndexData", function() { return loadedIndexData; }, function(value) { loadedIndexData = value; });
 bindRuntimeStateProperty("loadedIndexPath", function() { return loadedIndexPath; }, function(value) { loadedIndexPath = value; });
@@ -949,6 +1051,10 @@ function currentTimeStampHms() {
 
 function currentDateStampYmd() {
   return lineBaseUtils.currentDateStampYmd();
+}
+
+function createPoolIdFromCurrentTime() {
+  return "pool_" + currentDateStampYmd() + "_" + currentTimeStampHms();
 }
 
 function joinPath(folderPath, fileName) {
@@ -1002,7 +1108,7 @@ function buildRandomPoolFromValues(lineCount, randomValues) {
     attributes.a.push(mapToRange(randomValues[cursor], 0.1, 1.0)); //original was 0.25 to 1.0, but changed to 0.1 to 1.0 for more variety
     cursor += 1;
 
-    attributes.line_width.push(mapToRange(randomValues[cursor], 0.005, 0.5));
+    attributes.line_width.push(mapToRange(randomValues[cursor], lineWidthRangeMin, lineWidthRangeMax));
     cursor += 1;
   }
 
@@ -1046,7 +1152,11 @@ function ensureSceneTransformSpace() {
 }
 
 function ensureLayerTransformSpace(layerId) {
-  const key = String(layerId || "");
+  if (layerId === null || typeof layerId === "undefined") {
+    return TRANSFORM_SPACE_LOCAL;
+  }
+
+  const key = String(layerId);
   if (key.length === 0) {
     return TRANSFORM_SPACE_LOCAL;
   }
@@ -1060,7 +1170,11 @@ function ensureLayerTransformSpace(layerId) {
 }
 
 function ensureGroupTransformSpace(groupId) {
-  const key = String(groupId || "");
+  if (groupId === null || typeof groupId === "undefined") {
+    return TRANSFORM_SPACE_LOCAL;
+  }
+
+  const key = String(groupId);
   if (key.length === 0) {
     return TRANSFORM_SPACE_LOCAL;
   }
@@ -1074,7 +1188,11 @@ function ensureGroupTransformSpace(groupId) {
 }
 
 function ensureLineTransformSpace(lineId) {
-  const key = String(lineId || "");
+  if (lineId === null || typeof lineId === "undefined") {
+    return TRANSFORM_SPACE_LOCAL;
+  }
+
+  const key = String(lineId);
   if (key.length === 0) {
     return TRANSFORM_SPACE_LOCAL;
   }
@@ -1236,7 +1354,11 @@ function normalizeTransform(transform, fallbackLayerId) {
 }
 
 function ensureLayerTransform(layerId) {
-  const key = String(layerId || "");
+  if (layerId === null || typeof layerId === "undefined") {
+    return null;
+  }
+
+  const key = String(layerId);
   if (key.length === 0) {
     return null;
   }
@@ -1250,7 +1372,11 @@ function ensureLayerTransform(layerId) {
 }
 
 function ensureGroupTransform(groupId, layerId) {
-  const key = String(groupId || "");
+  if (groupId === null || typeof groupId === "undefined") {
+    return null;
+  }
+
+  const key = String(groupId);
   if (key.length === 0) {
     return null;
   }
@@ -1265,7 +1391,11 @@ function ensureGroupTransform(groupId, layerId) {
 }
 
 function ensureLineTransform(lineId) {
-  const key = String(lineId || "");
+  if (lineId === null || typeof lineId === "undefined") {
+    return null;
+  }
+
+  const key = String(lineId);
   if (key.length === 0) {
     return null;
   }
@@ -1366,7 +1496,9 @@ function captureLineTransformSpaceState() {
 
 function captureRenderSettingsState() {
   return {
-    erase_color: eraseColor.slice()
+    erase_color: eraseColor.slice(),
+    linewidth_range: [Number(lineWidthRangeMin), Number(lineWidthRangeMax)],
+    linewidth_multiplier: Number(lineWidthMultiplier)
   };
 }
 
@@ -1413,10 +1545,44 @@ function isValidEraseColorArray(value) {
   );
 }
 
+function isValidLineWidthRangeValues(minWidth, maxWidth) {
+  const minNumeric = Number(minWidth);
+  const maxNumeric = Number(maxWidth);
+
+  if (!isFinite(minNumeric) || !isFinite(maxNumeric)) {
+    return false;
+  }
+
+  if (minNumeric <= 0 || maxNumeric <= 0) {
+    return false;
+  }
+
+  if (minNumeric >= maxNumeric) {
+    return false;
+  }
+
+  return true;
+}
+
+function isValidLineWidthRangeArray(value) {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    isValidLineWidthRangeValues(value[0], value[1])
+  );
+}
+
+function isValidLineWidthMultiplierValue(value) {
+  const numeric = Number(value);
+  return isFinite(numeric) && numeric > 0;
+}
+
 function applyRenderSettingsState(renderSettings) {
   if (!renderSettings || typeof renderSettings !== "object") {
     return false;
   }
+
+  let didApplyEraseColor = false;
 
   const nextEraseColor = renderSettings.erase_color;
   if (isValidEraseColorArray(nextEraseColor)) {
@@ -1426,10 +1592,21 @@ function applyRenderSettingsState(renderSettings) {
       Number(nextEraseColor[2]),
       Number(nextEraseColor[3])
     ];
-    return true;
+    didApplyEraseColor = true;
   }
 
-  return false;
+  const nextLineWidthRange = renderSettings.linewidth_range;
+  if (isValidLineWidthRangeArray(nextLineWidthRange)) {
+    lineWidthRangeMin = Number(nextLineWidthRange[0]);
+    lineWidthRangeMax = Number(nextLineWidthRange[1]);
+  }
+
+  const nextLineWidthMultiplier = renderSettings.linewidth_multiplier;
+  if (isValidLineWidthMultiplierValue(nextLineWidthMultiplier)) {
+    lineWidthMultiplier = Number(nextLineWidthMultiplier);
+  }
+
+  return didApplyEraseColor;
 }
 
 function applySceneTransformState(state) {
@@ -2197,7 +2374,7 @@ function buildRandomPool(lineCount) {
     attributes.a.push(mapToRange(randomValues[cursor], 0.1, 1.0));
     cursor += 1;
 
-    attributes.line_width.push(mapToRange(randomValues[cursor], 0.005, 0.5));
+    attributes.line_width.push(mapToRange(randomValues[cursor], lineWidthRangeMin, lineWidthRangeMax));
     cursor += 1;
   }
 
@@ -2826,11 +3003,52 @@ function get_erase_color() {
   outlet(0, "erase_color", eraseColor[0], eraseColor[1], eraseColor[2], eraseColor[3]);
 }
 
-function get_poolId() {
-  outlet(0, "pool_id", currentPoolId || "");
+function set_linewidth_range(min_width, max_width) {
+  if (!isValidLineWidthRangeValues(min_width, max_width)) {
+    log("set_linewidth_range requires finite values where min > 0, max > 0, and min < max");
+    return;
+  }
+
+  lineWidthRangeMin = Number(min_width);
+  lineWidthRangeMax = Number(max_width);
+  outlet(0, "linewidth", lineWidthRangeMin, lineWidthRangeMax);
+
+  if (randomPool && lines.length > 0) {
+    emitRenderCommands();
+  }
 }
 
-function set_poolId(poolId) {
+function get_linewidth_range() {
+  outlet(0, "linewidth", lineWidthRangeMin, lineWidthRangeMax);
+}
+
+function set_linewidth_multiplier(multiplier) {
+  if (!isValidLineWidthMultiplierValue(multiplier)) {
+    log("set_linewidth_multiplier requires a finite value greater than 0");
+    return;
+  }
+
+  lineWidthMultiplier = Number(multiplier);
+  outlet(0, "linewidth_multiplier", lineWidthMultiplier);
+
+  if (randomPool && lines.length > 0) {
+    emitRenderCommands();
+  }
+}
+
+function get_linewidth_multiplier() {
+  outlet(0, "linewidth_multiplier", lineWidthMultiplier);
+}
+
+function get_poolId() {
+  if (currentPoolId === null || currentPoolId === undefined || currentPoolId === "") {
+    log("get_poolId: no poolId is currently set");
+    return;
+  }
+  outlet(0, "pool_id", currentPoolId);
+}
+
+  function set_poolId(poolId) {
   const resolvedPoolId = String(poolId || "").trim();
   if (resolvedPoolId.length === 0) {
     log("set_poolId requires a non-empty poolId");
@@ -3060,10 +3278,12 @@ function save_randomPool() {
   }
 
   const timestamp = currentTimeStampHms();
-  const dateStamp = currentDateStampYmd();
   const fileName = "randomPool_" + timestamp + ".json";
   const fullPath = joinPath(targetPath, fileName);
-  const poolId = "pool_" + dateStamp + "_" + timestamp;
+  const poolId =
+    typeof currentPoolId === "string" && currentPoolId.length > 0
+      ? currentPoolId
+      : createPoolIdFromCurrentTime();
   const sourceRandomValues = randomPool.random_values.slice();
 
   const payload = {
@@ -3352,6 +3572,9 @@ function load_view(fullFilePath) {
   }
 
   eraseColor = DEFAULT_ERASE_COLOR.slice();
+  lineWidthRangeMin = DEFAULT_LINE_WIDTH_RANGE_MIN;
+  lineWidthRangeMax = DEFAULT_LINE_WIDTH_RANGE_MAX;
+  lineWidthMultiplier = DEFAULT_LINE_WIDTH_MULTIPLIER;
   let didApplyRenderSettings = false;
 
   if (parsed.render_settings && typeof parsed.render_settings === "object") {
@@ -3362,6 +3585,9 @@ function load_view(fullFilePath) {
   if (!didApplyRenderSettings && isValidEraseColorArray(parsed.erase_color)) {
     applyRenderSettingsState({ erase_color: parsed.erase_color });
   }
+
+  outlet(0, "linewidth", lineWidthRangeMin, lineWidthRangeMax);
+  outlet(0, "linewidth_multiplier", lineWidthMultiplier);
 
   applyHierarchyLineOrder();
   applyVisibilityState(parsed.visibility);
@@ -4185,7 +4411,6 @@ function generate(numLines) {
   }
 
   randomPool = deepFreezeObject(buildRandomPool(count));
-  currentPoolId = null;
   coordinateOverrides = null;
   poolOverrides = null;
   sortState = createDefaultSortState();
@@ -4194,6 +4419,9 @@ function generate(numLines) {
     log("randomPool lock failed");
     return;
   }
+
+  currentPoolId = createPoolIdFromCurrentTime();
+  outlet(0, "pool_id", currentPoolId);
 
   pointOrder = createPointOrder(randomPool.point_count);
   shufflePointOrder(pointOrder);
