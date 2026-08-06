@@ -81,6 +81,15 @@ Purpose: Sets the current path name used as the storage key for immutable pool d
 Syntax: get_pathName
 Purpose: Emits the current path name as: pathName nameValue.
 
+14a. set_erase_color r g b a
+Syntax: set_erase_color 0 0 0 1
+Purpose: Sets the erase color used by the system.
+  erase_color is part of the View state and is saved/loaded with view files.
+
+14b. get_erase_color
+Syntax: get_erase_color
+Purpose: Emits the current erase color as: erase_color r g b a.
+
 15. save_randomPool
 Syntax: save_randomPool
 Purpose: Saves immutable pool-only data to pathName using a timestamped filename: randomPool_hh-mm-ss.json.
@@ -400,6 +409,10 @@ Sort outlet messages:
   Emitted by reportSortRows.
 - sort_rows_end rowCount
   Emitted by reportSortRows after row payloads.
+
+Erase color outlet messages:
+- erase_color r g b a
+  Emitted by get_erase_color.
 */
 
 "use strict";
@@ -435,6 +448,7 @@ const SORT_CHANNEL_G = "g";
 const SORT_CHANNEL_B = "b";
 const SORT_CHANNEL_A = "a";
 const SORT_CHANNEL_RGBA = "rgba";
+const DEFAULT_ERASE_COLOR = [0, 0, 0, 1];
 const lineBaseValidators = lineBaseValidatorModule.createLineBaseValidators({
   RANDOMS_PER_POINT: RANDOMS_PER_POINT,
   TRANSFORM_SPACE_LOCAL: TRANSFORM_SPACE_LOCAL,
@@ -462,6 +476,7 @@ let selectedLayerId = null;
 let selectedGroupId = null;
 let selectedLineId = null;
 let pathName = "unset";
+let eraseColor = DEFAULT_ERASE_COLOR.slice();
 let currentPoolId = null;
 let loadedIndexData = null;
 let loadedIndexPath = "";
@@ -703,6 +718,11 @@ const lineBaseRender = lineBaseRenderModule.createLineBaseRender({
   emit: function() {
     return runtime.deps.emit.apply(null, arguments);
   },
+  getRenderSettings: function() {
+    return {
+      eraseColor: eraseColor.slice()
+    };
+  },
   getLines: function() {
     return lines;
   },
@@ -900,6 +920,7 @@ bindRuntimeStateProperty("selectedLayerId", function() { return selectedLayerId;
 bindRuntimeStateProperty("selectedGroupId", function() { return selectedGroupId; }, function(value) { selectedGroupId = value; });
 bindRuntimeStateProperty("selectedLineId", function() { return selectedLineId; }, function(value) { selectedLineId = value; });
 bindRuntimeStateProperty("pathName", function() { return pathName; }, function(value) { pathName = value; });
+bindRuntimeStateProperty("eraseColor", function() { return eraseColor; }, function(value) { eraseColor = value; });
 bindRuntimeStateProperty("currentPoolId", function() { return currentPoolId; }, function(value) { currentPoolId = value; });
 bindRuntimeStateProperty("loadedIndexData", function() { return loadedIndexData; }, function(value) { loadedIndexData = value; });
 bindRuntimeStateProperty("loadedIndexPath", function() { return loadedIndexPath; }, function(value) { loadedIndexPath = value; });
@@ -1343,6 +1364,12 @@ function captureLineTransformSpaceState() {
   return lineBaseStateHelpers.captureLineTransformSpaceState();
 }
 
+function captureRenderSettingsState() {
+  return {
+    erase_color: eraseColor.slice()
+  };
+}
+
 function captureSceneTransformState() {
   return lineBaseStateHelpers.captureSceneTransformState();
 }
@@ -1373,6 +1400,36 @@ function applyLineTransformState(stateById) {
 
 function applyLineTransformSpaceState(stateById) {
   lineBaseStateHelpers.applyLineTransformSpaceState(stateById);
+}
+
+function isValidEraseColorArray(value) {
+  return (
+    Array.isArray(value) &&
+    value.length === 4 &&
+    isFinite(Number(value[0])) &&
+    isFinite(Number(value[1])) &&
+    isFinite(Number(value[2])) &&
+    isFinite(Number(value[3]))
+  );
+}
+
+function applyRenderSettingsState(renderSettings) {
+  if (!renderSettings || typeof renderSettings !== "object") {
+    return false;
+  }
+
+  const nextEraseColor = renderSettings.erase_color;
+  if (isValidEraseColorArray(nextEraseColor)) {
+    eraseColor = [
+      Number(nextEraseColor[0]),
+      Number(nextEraseColor[1]),
+      Number(nextEraseColor[2]),
+      Number(nextEraseColor[3])
+    ];
+    return true;
+  }
+
+  return false;
 }
 
 function applySceneTransformState(state) {
@@ -2752,6 +2809,23 @@ function get_pathName() {
   outlet(0, "pathName", pathName);
 }
 
+function set_erase_color(r, g, b, a) {
+  const nextColor = [Number(r), Number(g), Number(b), Number(a)];
+
+  for (let i = 0; i < nextColor.length; i += 1) {
+    if (!isFinite(nextColor[i])) {
+      log("set_erase_color requires four finite numeric values");
+      return;
+    }
+  }
+
+  eraseColor = nextColor;
+}
+
+function get_erase_color() {
+  outlet(0, "erase_color", eraseColor[0], eraseColor[1], eraseColor[2], eraseColor[3]);
+}
+
 function get_poolId() {
   outlet(0, "pool_id", currentPoolId || "");
 }
@@ -3113,6 +3187,7 @@ function save_view(viewId) {
     visibility: captureVisibilityState(),
     colors_by_line_id: captureColorState(),
     line_width_by_line_id: captureLineWidthState(),
+    render_settings: captureRenderSettingsState(),
     scene_transform: captureSceneTransformState(),
     scene_space: captureSceneTransformSpaceState(),
     layer_transforms_by_id: captureLayerTransformState(),
@@ -3274,6 +3349,18 @@ function load_view(fullFilePath) {
 
   if (typeof parsed.scene_space !== "undefined") {
     sceneTransformSpace = normalizeSceneTransformSpace(parsed.scene_space);
+  }
+
+  eraseColor = DEFAULT_ERASE_COLOR.slice();
+  let didApplyRenderSettings = false;
+
+  if (parsed.render_settings && typeof parsed.render_settings === "object") {
+    didApplyRenderSettings = applyRenderSettingsState(parsed.render_settings);
+  }
+
+  // Backward compatibility for older view payloads that stored erase_color at top level.
+  if (!didApplyRenderSettings && isValidEraseColorArray(parsed.erase_color)) {
+    applyRenderSettingsState({ erase_color: parsed.erase_color });
   }
 
   applyHierarchyLineOrder();

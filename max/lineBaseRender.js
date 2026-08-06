@@ -7,7 +7,31 @@ function createLineBaseRender(config) {
     return Math.max(1, Number(lineWidth) * 120);
   }
 
+  function normalizeEraseColor(candidate) {
+    if (
+      Array.isArray(candidate) &&
+      candidate.length === 4 &&
+      isFinite(Number(candidate[0])) &&
+      isFinite(Number(candidate[1])) &&
+      isFinite(Number(candidate[2])) &&
+      isFinite(Number(candidate[3]))
+    ) {
+      return [
+        Number(candidate[0]),
+        Number(candidate[1]),
+        Number(candidate[2]),
+        Number(candidate[3])
+      ];
+    }
+
+    return [0, 0, 0, 1];
+  }
+
   function emitRenderCommands() {
+    const renderSettings = safeConfig.getRenderSettings ? safeConfig.getRenderSettings() : {};
+    const eraseColor = normalizeEraseColor(renderSettings && renderSettings.eraseColor);
+
+    safeConfig.emit(0, "erase_color", eraseColor[0], eraseColor[1], eraseColor[2], eraseColor[3]);
     safeConfig.emit(0, "sketch", "reset");
 
     const lines = safeConfig.getLines();

@@ -209,6 +209,26 @@ function createLineBaseValidators(config) {
       }
     }
 
+    if (typeof payload.render_settings !== "undefined") {
+      if (!payload.render_settings || typeof payload.render_settings !== "object") {
+        return false;
+      }
+
+      if (typeof payload.render_settings.erase_color !== "undefined") {
+        const eraseColor = payload.render_settings.erase_color;
+        if (
+          !Array.isArray(eraseColor) ||
+          eraseColor.length !== 4 ||
+          !isFinite(Number(eraseColor[0])) ||
+          !isFinite(Number(eraseColor[1])) ||
+          !isFinite(Number(eraseColor[2])) ||
+          !isFinite(Number(eraseColor[3]))
+        ) {
+          return false;
+        }
+      }
+    }
+
     if (typeof payload.transform_version !== "undefined") {
       const transformVersion = Number(payload.transform_version);
       if (!isFinite(transformVersion) || Math.floor(transformVersion) !== transformVersion || transformVersion < 1) {
