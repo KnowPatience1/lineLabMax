@@ -271,6 +271,25 @@ function createLineBaseValidators(config) {
         }
       }
 
+      if (typeof payload.render_settings.group_color_maps_by_group_id !== "undefined") {
+        const groupColorMapsById = payload.render_settings.group_color_maps_by_group_id;
+        if (!groupColorMapsById || typeof groupColorMapsById !== "object") {
+          return false;
+        }
+
+        const groupIds = Object.keys(groupColorMapsById);
+        for (let i = 0; i < groupIds.length; i += 1) {
+          const groupId = String(groupIds[i] || "").trim();
+          if (groupId.length === 0) {
+            return false;
+          }
+
+          if (!isValidColorMapArray(groupColorMapsById[groupIds[i]])) {
+            return false;
+          }
+        }
+      }
+
       if (typeof payload.render_settings.linewidth_range !== "undefined") {
         const lineWidthRange = payload.render_settings.linewidth_range;
         if (

@@ -118,6 +118,23 @@ Purpose: Sets the global mapped RGBA output ranges used to derive line colors fr
 Syntax: get_color_map
 Purpose: Emits current global color map as: color_map rmin rmax gmin gmax bmin bmax amin amax.
 
+14i. set_group_color_map groupId rmin rmax gmin gmax bmin bmax amin amax
+Syntax: set_group_color_map g2 0.1 0.7 0.2 0.9 0.3 1 0.25 0.9
+Purpose: Sets a group-level mapped RGBA output range override used to derive colors for lines in a specific group.
+  Emits group_color_map groupId rmin rmax gmin gmax bmin bmax amin amax on success.
+
+14j. get_group_color_map groupId
+Syntax: get_group_color_map g2
+Purpose: Emits the group-level color map override for a specific group when set.
+
+14k. clear_group_color_map groupId
+Syntax: clear_group_color_map g2
+Purpose: Clears a group-level color map override for a specific group.
+
+14l. clear_all_group_color_maps
+Syntax: clear_all_group_color_maps
+Purpose: Clears all group-level color map overrides.
+
 15. save_randomPool
 Syntax: save_randomPool
 Purpose: Saves immutable pool-only data to pathName using a timestamped filename: randomPool_hh-mm-ss.json.
@@ -457,6 +474,12 @@ Line width outlet messages:
 Color map outlet messages:
 - color_map rmin rmax gmin gmax bmin bmax amin amax
   Emitted by set_color_map, get_color_map, and load_view.
+- group_color_map groupId rmin rmax gmin gmax bmin bmax amin amax
+  Emitted by set_group_color_map and get_group_color_map.
+- group_color_map_cleared groupId
+  Emitted by clear_group_color_map.
+- group_color_maps_cleared count
+  Emitted by clear_all_group_color_maps.
 */
 
 "use strict";
@@ -526,6 +549,7 @@ let selectedLineId = null;
 let pathName = "unset";
 let eraseColor = DEFAULT_ERASE_COLOR.slice();
 let colorMap = DEFAULT_COLOR_MAP.slice();
+let groupColorMapsById = {};
 let colorDriverPermutation = null;
 let lineWidthRangeMin = DEFAULT_LINE_WIDTH_RANGE_MIN;
 let lineWidthRangeMax = DEFAULT_LINE_WIDTH_RANGE_MAX;
@@ -1038,6 +1062,7 @@ bindRuntimeStateProperty("selectedLineId", function() { return selectedLineId; }
 bindRuntimeStateProperty("pathName", function() { return pathName; }, function(value) { pathName = value; });
 bindRuntimeStateProperty("eraseColor", function() { return eraseColor; }, function(value) { eraseColor = value; });
 bindRuntimeStateProperty("colorMap", function() { return colorMap; }, function(value) { colorMap = value; });
+bindRuntimeStateProperty("groupColorMapsById", function() { return groupColorMapsById; }, function(value) { groupColorMapsById = value; });
 bindRuntimeStateProperty("colorDriverPermutation", function() { return colorDriverPermutation; }, function(value) { colorDriverPermutation = value; });
 bindRuntimeStateProperty("lineWidthRangeMin", function() { return lineWidthRangeMin; }, function(value) { lineWidthRangeMin = value; });
 bindRuntimeStateProperty("lineWidthRangeMax", function() { return lineWidthRangeMax; }, function(value) { lineWidthRangeMax = value; });
@@ -1569,6 +1594,7 @@ function captureRenderSettingsState() {
   return {
     erase_color: eraseColor.slice(),
     color_map: colorMap.slice(),
+    group_color_maps_by_group_id: cloneJsonSafe(groupColorMapsById),
     linewidth_range: [Number(lineWidthRangeMin), Number(lineWidthRangeMax)],
     linewidth_multiplier: Number(lineWidthMultiplier)
   };
@@ -1657,6 +1683,60 @@ function emitColorMapState() {
   );
 }
 
+function sanitizeGroupColorMapState(rawState) {
+  if (!rawState || typeof rawState !== "object") {
+    return {};
+  }
+
+  const nextState = {};
+  const keys = Object.keys(rawState);
+  for (let i = 0; i < keys.length; i += 1) {
+    const key = String(keys[i] || "").trim();
+    if (key.length === 0) {
+      continue;
+    }
+
+    const value = rawState[key];
+    if (!isValidColorMapArray(value)) {
+      continue;
+    }
+
+    nextState[key] = value.slice();
+  }
+
+  return nextState;
+}
+
+function resolveGroupColorMap(groupId) {
+  const normalizedGroupId = String(groupId || "").trim();
+  if (
+    normalizedGroupId.length > 0 &&
+    groupColorMapsById &&
+    Object.prototype.hasOwnProperty.call(groupColorMapsById, normalizedGroupId) &&
+    isValidColorMapArray(groupColorMapsById[normalizedGroupId])
+  ) {
+    return groupColorMapsById[normalizedGroupId];
+  }
+
+  return colorMap;
+}
+
+function emitGroupColorMapState(groupId, mapValues) {
+  outlet(
+    0,
+    "group_color_map",
+    groupId,
+    mapValues[0],
+    mapValues[1],
+    mapValues[2],
+    mapValues[3],
+    mapValues[4],
+    mapValues[5],
+    mapValues[6],
+    mapValues[7]
+  );
+}
+
 function resolveColorDriverSourceIndex(definitions, lineIndex, fallbackStartPointIndex) {
   if (!Array.isArray(definitions) || definitions.length === 0) {
     return fallbackStartPointIndex;
@@ -1671,14 +1751,15 @@ function resolveColorDriverSourceIndex(definitions, lineIndex, fallbackStartPoin
   return Number(sourceDefinition.start_index);
 }
 
-function buildMappedColorFromAttributes(attributes, definitions, lineIndex, fallbackStartPointIndex) {
+function buildMappedColorFromAttributes(attributes, definitions, lineIndex, fallbackStartPointIndex, groupId) {
   const sourceIndex = resolveColorDriverSourceIndex(definitions, lineIndex, fallbackStartPointIndex);
+  const activeColorMap = resolveGroupColorMap(groupId);
 
   return [
-    mapToRange(attributes.r[sourceIndex], colorMap[0], colorMap[1]),
-    mapToRange(attributes.g[sourceIndex], colorMap[2], colorMap[3]),
-    mapToRange(attributes.b[sourceIndex], colorMap[4], colorMap[5]),
-    mapToRange(attributes.a[sourceIndex], colorMap[6], colorMap[7])
+    mapToRange(attributes.r[sourceIndex], activeColorMap[0], activeColorMap[1]),
+    mapToRange(attributes.g[sourceIndex], activeColorMap[2], activeColorMap[3]),
+    mapToRange(attributes.b[sourceIndex], activeColorMap[4], activeColorMap[5]),
+    mapToRange(attributes.a[sourceIndex], activeColorMap[6], activeColorMap[7])
   ];
 }
 
@@ -1789,6 +1870,11 @@ function applyRenderSettingsState(renderSettings) {
   const nextColorMap = renderSettings.color_map;
   if (isValidColorMapArray(nextColorMap)) {
     colorMap = nextColorMap.slice();
+  }
+
+  const nextGroupColorMapsById = renderSettings.group_color_maps_by_group_id;
+  if (nextGroupColorMapsById && typeof nextGroupColorMapsById === "object") {
+    groupColorMapsById = sanitizeGroupColorMapState(nextGroupColorMapsById);
   }
 
   const nextLineWidthRange = renderSettings.linewidth_range;
@@ -2302,6 +2388,11 @@ function buildBaselineLinesFromCurrentPool() {
   const definitions = buildLineDefinitionsFromPointOrder(pointOrder);
   const activeAttributes = getActiveAttributes(randomPool);
   const baselineLines = [];
+  const lineById = {};
+
+  for (let i = 0; i < lines.length; i += 1) {
+    lineById[lines[i].id] = lines[i];
+  }
 
   for (let i = 0; i < definitions.length; i += 1) {
     const definition = definitions[i];
@@ -2309,12 +2400,16 @@ function buildBaselineLinesFromCurrentPool() {
     const endPointIndex = definition.end_index;
     const startCoords = getPointCoordinates(randomPool, startPointIndex);
     const endCoords = getPointCoordinates(randomPool, endPointIndex);
+    const existingLine = lineById[definition.id];
+    const groupId = existingLine && typeof existingLine.group_id === "string"
+      ? existingLine.group_id
+      : null;
 
     baselineLines.push({
       id: definition.id,
       start_coords: startCoords,
       end_coords: endCoords,
-      color: buildMappedColorFromAttributes(activeAttributes, definitions, i, startPointIndex),
+      color: buildMappedColorFromAttributes(activeAttributes, definitions, i, startPointIndex, groupId),
       line_width: activeAttributes.line_width[startPointIndex]
     });
   }
@@ -2616,7 +2711,7 @@ function buildLinesFromPool(pool, definitions) {
       base_end_coords: endCoords.slice(),
       start_coords: startCoords,
       end_coords: endCoords,
-      color: buildMappedColorFromAttributes(attributes, definitions, i, startPointIndex),
+      color: buildMappedColorFromAttributes(attributes, definitions, i, startPointIndex, null),
       line_width: attributes.line_width[startPointIndex],
       visible: true
     });
@@ -2887,6 +2982,7 @@ function emitLayerMenu() {
 
 function buildHierarchyFromCurrentLines() {
   if (!lines || lines.length === 0) {
+    groupColorMapsById = {};
     hierarchy = null;
     reconcileTransformState();
     emitLayerMenu();
@@ -2947,6 +3043,8 @@ function buildHierarchyFromCurrentLines() {
     },
     ordered_line_ids: orderedLineIds
   };
+
+  groupColorMapsById = {};
 
   reconcileTransformState();
 
@@ -3186,6 +3284,92 @@ function set_color_map(rmin, rmax, gmin, gmax, bmin, bmax, amin, amax) {
 
 function get_color_map() {
   emitColorMapState();
+}
+
+function set_group_color_map(groupId, rmin, rmax, gmin, gmax, bmin, bmax, amin, amax) {
+  if (!hierarchy || !Array.isArray(hierarchy.groups) || hierarchy.groups.length === 0) {
+    log("set_group_color_map requires generated data");
+    return;
+  }
+
+  const normalizedGroupId = String(groupId || "").trim();
+  if (normalizedGroupId.length === 0) {
+    log("set_group_color_map requires a non-empty groupId");
+    return;
+  }
+
+  if (!getHierarchyGroupById(normalizedGroupId)) {
+    log("set_group_color_map unknown group " + normalizedGroupId);
+    return;
+  }
+
+  const nextColorMap = [
+    Number(rmin), Number(rmax), Number(gmin), Number(gmax),
+    Number(bmin), Number(bmax), Number(amin), Number(amax)
+  ];
+
+  if (!isValidColorMapArray(nextColorMap)) {
+    log("set_group_color_map requires eight finite values in range 0..1 with min < max for each channel pair");
+    return;
+  }
+
+  groupColorMapsById[normalizedGroupId] = nextColorMap;
+  emitGroupColorMapState(normalizedGroupId, nextColorMap);
+
+  if (randomPool && lines.length > 0) {
+    applyCurrentDerivedColorsToLines();
+    emitRenderCommands();
+  }
+}
+
+function get_group_color_map(groupId) {
+  const normalizedGroupId = String(groupId || "").trim();
+  if (normalizedGroupId.length === 0) {
+    log("get_group_color_map requires a non-empty groupId");
+    return;
+  }
+
+  const mapValues = groupColorMapsById[normalizedGroupId];
+  if (!isValidColorMapArray(mapValues)) {
+    log("get_group_color_map no override for group " + normalizedGroupId);
+    return;
+  }
+
+  emitGroupColorMapState(normalizedGroupId, mapValues);
+}
+
+function clear_group_color_map(groupId) {
+  const normalizedGroupId = String(groupId || "").trim();
+  if (normalizedGroupId.length === 0) {
+    log("clear_group_color_map requires a non-empty groupId");
+    return;
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(groupColorMapsById, normalizedGroupId)) {
+    log("clear_group_color_map no override for group " + normalizedGroupId);
+    return;
+  }
+
+  delete groupColorMapsById[normalizedGroupId];
+  outlet(0, "group_color_map_cleared", normalizedGroupId);
+
+  if (randomPool && lines.length > 0) {
+    applyCurrentDerivedColorsToLines();
+    emitRenderCommands();
+  }
+}
+
+function clear_all_group_color_maps() {
+  const keys = Object.keys(groupColorMapsById);
+  const clearedCount = keys.length;
+
+  groupColorMapsById = {};
+  outlet(0, "group_color_maps_cleared", clearedCount);
+
+  if (clearedCount > 0 && randomPool && lines.length > 0) {
+    applyCurrentDerivedColorsToLines();
+    emitRenderCommands();
+  }
 }
 
 function set_linewidth_range(min_width, max_width) {
@@ -3764,6 +3948,7 @@ function load_view(fullFilePath) {
 
   eraseColor = DEFAULT_ERASE_COLOR.slice();
   colorMap = DEFAULT_COLOR_MAP.slice();
+  groupColorMapsById = {};
   lineWidthRangeMin = DEFAULT_LINE_WIDTH_RANGE_MIN;
   lineWidthRangeMax = DEFAULT_LINE_WIDTH_RANGE_MAX;
   lineWidthMultiplier = DEFAULT_LINE_WIDTH_MULTIPLIER;
