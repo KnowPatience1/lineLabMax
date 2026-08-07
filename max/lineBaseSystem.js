@@ -109,6 +109,15 @@ Purpose: Sets render-time line-width multiplier used for sketch gllinewidth.
 Syntax: get_linewidth_multiplier
 Purpose: Emits current render-time line-width multiplier as: linewidth_multiplier value.
 
+14g. set_color_map rmin rmax gmin gmax bmin bmax amin amax
+Syntax: set_color_map 0.2 0.9 0.1 0.8 0.3 1 0.4 1
+Purpose: Sets the global mapped RGBA output ranges used to derive line colors from immutable pool attributes.
+  Emits color_map rmin rmax gmin gmax bmin bmax amin amax on success.
+
+14h. get_color_map
+Syntax: get_color_map
+Purpose: Emits current global color map as: color_map rmin rmax gmin gmax bmin bmax amin amax.
+
 15. save_randomPool
 Syntax: save_randomPool
 Purpose: Saves immutable pool-only data to pathName using a timestamped filename: randomPool_hh-mm-ss.json.
@@ -176,7 +185,8 @@ Emits: architecture_rows_begin, then architecture_row layerId groupId lineId lay
 
 30. reshuffleLineColors
 Syntax: reshuffleLineColors
-Purpose: Randomly reassigns line colors only while keeping line geometry, hierarchy, and line order unchanged.
+Purpose: Randomly reassigns line colors by reshuffling source color-driver indices only while keeping line geometry, hierarchy, and line order unchanged.
+  The reshuffle is saved as mutable View state so it can be reconstructed from the original pool.
 
 31. reshuffleLineWidths
 Syntax: reshuffleLineWidths
@@ -443,6 +453,10 @@ Line width outlet messages:
   Emitted by set_linewidth_range, get_linewidth_range, and load_view.
 - linewidth_multiplier value
   Emitted by set_linewidth_multiplier, get_linewidth_multiplier, and load_view.
+
+Color map outlet messages:
+- color_map rmin rmax gmin gmax bmin bmax amin amax
+  Emitted by set_color_map, get_color_map, and load_view.
 */
 
 "use strict";
@@ -479,6 +493,7 @@ const SORT_CHANNEL_B = "b";
 const SORT_CHANNEL_A = "a";
 const SORT_CHANNEL_RGBA = "rgba";
 const DEFAULT_ERASE_COLOR = [0, 0, 0, 1];
+const DEFAULT_COLOR_MAP = [0, 1, 0, 1, 0, 1, 0, 1];
 const DEFAULT_LINE_WIDTH_RANGE_MIN = 0.005;
 const DEFAULT_LINE_WIDTH_RANGE_MAX = 0.5;
 const DEFAULT_LINE_WIDTH_MULTIPLIER = 120;
@@ -510,6 +525,8 @@ let selectedGroupId = null;
 let selectedLineId = null;
 let pathName = "unset";
 let eraseColor = DEFAULT_ERASE_COLOR.slice();
+let colorMap = DEFAULT_COLOR_MAP.slice();
+let colorDriverPermutation = null;
 let lineWidthRangeMin = DEFAULT_LINE_WIDTH_RANGE_MIN;
 let lineWidthRangeMax = DEFAULT_LINE_WIDTH_RANGE_MAX;
 let lineWidthMultiplier = DEFAULT_LINE_WIDTH_MULTIPLIER;
@@ -1020,6 +1037,8 @@ bindRuntimeStateProperty("selectedGroupId", function() { return selectedGroupId;
 bindRuntimeStateProperty("selectedLineId", function() { return selectedLineId; }, function(value) { selectedLineId = value; });
 bindRuntimeStateProperty("pathName", function() { return pathName; }, function(value) { pathName = value; });
 bindRuntimeStateProperty("eraseColor", function() { return eraseColor; }, function(value) { eraseColor = value; });
+bindRuntimeStateProperty("colorMap", function() { return colorMap; }, function(value) { colorMap = value; });
+bindRuntimeStateProperty("colorDriverPermutation", function() { return colorDriverPermutation; }, function(value) { colorDriverPermutation = value; });
 bindRuntimeStateProperty("lineWidthRangeMin", function() { return lineWidthRangeMin; }, function(value) { lineWidthRangeMin = value; });
 bindRuntimeStateProperty("lineWidthRangeMax", function() { return lineWidthRangeMax; }, function(value) { lineWidthRangeMax = value; });
 bindRuntimeStateProperty("lineWidthMultiplier", function() { return lineWidthMultiplier; }, function(value) { lineWidthMultiplier = value; });
@@ -1221,51 +1240,103 @@ function captureVisibilityState() {
   return lineBaseStateHelpers.captureVisibilityState();
 }
 
-function captureColorState() {
-  const colorsByLineId = {};
+function createIdentityColorDriverPermutation(lineCount) {
+  const permutation = [];
+  for (let i = 0; i < lineCount; i += 1) {
+    permutation.push(i);
+  }
 
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    const color = Array.isArray(line.color) ? line.color : [];
+  return permutation;
+}
 
-    if (color.length === 4) {
-      colorsByLineId[String(line.id)] = [
-        Number(color[0]),
-        Number(color[1]),
-        Number(color[2]),
-        Number(color[3])
-      ];
+function isIdentityColorDriverPermutation(permutation) {
+  if (!Array.isArray(permutation)) {
+    return false;
+  }
+
+  for (let i = 0; i < permutation.length; i += 1) {
+    if (Number(permutation[i]) !== i) {
+      return false;
     }
   }
 
-  return colorsByLineId;
+  return true;
 }
 
-function applyColorState(colorsByLineId) {
-  if (!colorsByLineId || typeof colorsByLineId !== "object") {
+function isValidColorDriverPermutation(permutation, expectedLength) {
+  if (!Array.isArray(permutation) || permutation.length !== expectedLength) {
+    return false;
+  }
+
+  const seen = {};
+  for (let i = 0; i < permutation.length; i += 1) {
+    const numeric = Number(permutation[i]);
+    if (!isFinite(numeric)) {
+      return false;
+    }
+
+    const index = Math.floor(numeric);
+    if (index !== numeric || index < 0 || index >= expectedLength) {
+      return false;
+    }
+
+    if (seen[index]) {
+      return false;
+    }
+
+    seen[index] = true;
+  }
+
+  return true;
+}
+
+function getEffectiveColorDriverPermutation(definitions) {
+  const lineCount = Array.isArray(definitions) ? definitions.length : 0;
+  if (!isValidColorDriverPermutation(colorDriverPermutation, lineCount)) {
+    return createIdentityColorDriverPermutation(lineCount);
+  }
+
+  const permutation = [];
+  for (let i = 0; i < colorDriverPermutation.length; i += 1) {
+    permutation.push(Number(colorDriverPermutation[i]));
+  }
+
+  return permutation;
+}
+
+function captureColorDriverPermutationState() {
+  if (!Array.isArray(lineDefinitions) || lineDefinitions.length === 0) {
+    return null;
+  }
+
+  if (!isValidColorDriverPermutation(colorDriverPermutation, lineDefinitions.length)) {
+    return null;
+  }
+
+  if (isIdentityColorDriverPermutation(colorDriverPermutation)) {
+    return null;
+  }
+
+  const snapshot = [];
+  for (let i = 0; i < colorDriverPermutation.length; i += 1) {
+    snapshot.push(Number(colorDriverPermutation[i]));
+  }
+
+  return snapshot;
+}
+
+function restoreColorDriverPermutationState(permutation, expectedLength) {
+  if (!isValidColorDriverPermutation(permutation, expectedLength)) {
+    colorDriverPermutation = null;
     return;
   }
 
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    const savedColor = colorsByLineId[String(line.id)];
-
-    if (
-      Array.isArray(savedColor) &&
-      savedColor.length === 4 &&
-      isFinite(Number(savedColor[0])) &&
-      isFinite(Number(savedColor[1])) &&
-      isFinite(Number(savedColor[2])) &&
-      isFinite(Number(savedColor[3]))
-    ) {
-      line.color = [
-        Number(savedColor[0]),
-        Number(savedColor[1]),
-        Number(savedColor[2]),
-        Number(savedColor[3])
-      ];
-    }
+  const restored = [];
+  for (let i = 0; i < permutation.length; i += 1) {
+    restored.push(Number(permutation[i]));
   }
+
+  colorDriverPermutation = isIdentityColorDriverPermutation(restored) ? null : restored;
 }
 
 function captureLineWidthState() {
@@ -1497,6 +1568,7 @@ function captureLineTransformSpaceState() {
 function captureRenderSettingsState() {
   return {
     erase_color: eraseColor.slice(),
+    color_map: colorMap.slice(),
     linewidth_range: [Number(lineWidthRangeMin), Number(lineWidthRangeMax)],
     linewidth_multiplier: Number(lineWidthMultiplier)
   };
@@ -1543,6 +1615,125 @@ function isValidEraseColorArray(value) {
     isFinite(Number(value[2])) &&
     isFinite(Number(value[3]))
   );
+}
+
+function isValidColorMapArray(value) {
+  if (!Array.isArray(value) || value.length !== 8) {
+    return false;
+  }
+
+  for (let i = 0; i < value.length; i += 2) {
+    const minValue = Number(value[i]);
+    const maxValue = Number(value[i + 1]);
+
+    if (!isFinite(minValue) || !isFinite(maxValue)) {
+      return false;
+    }
+
+    if (minValue < 0 || minValue > 1 || maxValue < 0 || maxValue > 1) {
+      return false;
+    }
+
+    if (minValue >= maxValue) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function emitColorMapState() {
+  outlet(
+    0,
+    "color_map",
+    colorMap[0],
+    colorMap[1],
+    colorMap[2],
+    colorMap[3],
+    colorMap[4],
+    colorMap[5],
+    colorMap[6],
+    colorMap[7]
+  );
+}
+
+function resolveColorDriverSourceIndex(definitions, lineIndex, fallbackStartPointIndex) {
+  if (!Array.isArray(definitions) || definitions.length === 0) {
+    return fallbackStartPointIndex;
+  }
+
+  const permutation = getEffectiveColorDriverPermutation(definitions);
+  const sourceDefinition = definitions[permutation[lineIndex]];
+  if (!sourceDefinition || !isFinite(Number(sourceDefinition.start_index))) {
+    return fallbackStartPointIndex;
+  }
+
+  return Number(sourceDefinition.start_index);
+}
+
+function buildMappedColorFromAttributes(attributes, definitions, lineIndex, fallbackStartPointIndex) {
+  const sourceIndex = resolveColorDriverSourceIndex(definitions, lineIndex, fallbackStartPointIndex);
+
+  return [
+    mapToRange(attributes.r[sourceIndex], colorMap[0], colorMap[1]),
+    mapToRange(attributes.g[sourceIndex], colorMap[2], colorMap[3]),
+    mapToRange(attributes.b[sourceIndex], colorMap[4], colorMap[5]),
+    mapToRange(attributes.a[sourceIndex], colorMap[6], colorMap[7])
+  ];
+}
+
+function applyColorSortStateToBaselineLines(baselineLines, state) {
+  const activeState = sanitizeSortState(state);
+
+  if (!activeState.applied || Number(activeState.colors.amount) <= 0) {
+    return;
+  }
+
+  const channelIndexes = activeState.colors.channel === SORT_CHANNEL_RGBA
+    ? [0, 1, 2, 3]
+    : [
+      activeState.colors.channel === SORT_CHANNEL_R
+        ? 0
+        : activeState.colors.channel === SORT_CHANNEL_G
+          ? 1
+          : activeState.colors.channel === SORT_CHANNEL_B
+            ? 2
+            : 3
+    ];
+
+  for (let c = 0; c < channelIndexes.length; c += 1) {
+    const colorIndex = channelIndexes[c];
+    const values = [];
+    for (let i = 0; i < baselineLines.length; i += 1) {
+      values.push(Number(baselineLines[i].color[colorIndex]));
+    }
+
+    const blended = sortBlendValues(values, activeState.colors.mode, activeState.colors.amount);
+    for (let i = 0; i < baselineLines.length; i += 1) {
+      baselineLines[i].color[colorIndex] = blended[i];
+    }
+  }
+}
+
+function applyCurrentDerivedColorsToLines() {
+  if (!randomPool || !Array.isArray(lines) || lines.length === 0) {
+    return;
+  }
+
+  const baselineLines = buildBaselineLinesFromCurrentPool();
+  applyColorSortStateToBaselineLines(baselineLines, sortState);
+
+  const baselineById = {};
+  for (let i = 0; i < baselineLines.length; i += 1) {
+    baselineById[baselineLines[i].id] = baselineLines[i].color.slice();
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (baselineById[line.id]) {
+      line.color = baselineById[line.id].slice();
+    }
+  }
 }
 
 function isValidLineWidthRangeValues(minWidth, maxWidth) {
@@ -1593,6 +1784,11 @@ function applyRenderSettingsState(renderSettings) {
       Number(nextEraseColor[3])
     ];
     didApplyEraseColor = true;
+  }
+
+  const nextColorMap = renderSettings.color_map;
+  if (isValidColorMapArray(nextColorMap)) {
+    colorMap = nextColorMap.slice();
   }
 
   const nextLineWidthRange = renderSettings.linewidth_range;
@@ -2118,12 +2314,7 @@ function buildBaselineLinesFromCurrentPool() {
       id: definition.id,
       start_coords: startCoords,
       end_coords: endCoords,
-      color: [
-        activeAttributes.r[startPointIndex],
-        activeAttributes.g[startPointIndex],
-        activeAttributes.b[startPointIndex],
-        activeAttributes.a[startPointIndex]
-      ],
+      color: buildMappedColorFromAttributes(activeAttributes, definitions, i, startPointIndex),
       line_width: activeAttributes.line_width[startPointIndex]
     });
   }
@@ -2161,32 +2352,7 @@ function applySortedStateToBaselineLines(baselineLines, state) {
     }
   }
 
-  if (Number(activeState.colors.amount) > 0) {
-    const channelIndexes = activeState.colors.channel === SORT_CHANNEL_RGBA
-      ? [0, 1, 2, 3]
-      : [
-        activeState.colors.channel === SORT_CHANNEL_R
-          ? 0
-          : activeState.colors.channel === SORT_CHANNEL_G
-            ? 1
-            : activeState.colors.channel === SORT_CHANNEL_B
-              ? 2
-              : 3
-      ];
-
-    for (let c = 0; c < channelIndexes.length; c += 1) {
-      const colorIndex = channelIndexes[c];
-      const values = [];
-      for (let i = 0; i < baselineLines.length; i += 1) {
-        values.push(Number(baselineLines[i].color[colorIndex]));
-      }
-
-      const blended = sortBlendValues(values, activeState.colors.mode, activeState.colors.amount);
-      for (let i = 0; i < baselineLines.length; i += 1) {
-        baselineLines[i].color[colorIndex] = blended[i];
-      }
-    }
-  }
+  applyColorSortStateToBaselineLines(baselineLines, activeState);
 
   if (Number(activeState.width.amount) > 0) {
     const widths = [];
@@ -2450,12 +2616,7 @@ function buildLinesFromPool(pool, definitions) {
       base_end_coords: endCoords.slice(),
       start_coords: startCoords,
       end_coords: endCoords,
-      color: [
-        attributes.r[startPointIndex],
-        attributes.g[startPointIndex],
-        attributes.b[startPointIndex],
-        attributes.a[startPointIndex]
-      ],
+      color: buildMappedColorFromAttributes(attributes, definitions, i, startPointIndex),
       line_width: attributes.line_width[startPointIndex],
       visible: true
     });
@@ -3003,6 +3164,30 @@ function get_erase_color() {
   outlet(0, "erase_color", eraseColor[0], eraseColor[1], eraseColor[2], eraseColor[3]);
 }
 
+function set_color_map(rmin, rmax, gmin, gmax, bmin, bmax, amin, amax) {
+  const nextColorMap = [
+    Number(rmin), Number(rmax), Number(gmin), Number(gmax),
+    Number(bmin), Number(bmax), Number(amin), Number(amax)
+  ];
+
+  if (!isValidColorMapArray(nextColorMap)) {
+    log("set_color_map requires eight finite values in range 0..1 with min < max for each channel pair");
+    return;
+  }
+
+  colorMap = nextColorMap;
+  emitColorMapState();
+
+  if (randomPool && lines.length > 0) {
+    applyCurrentDerivedColorsToLines();
+    emitRenderCommands();
+  }
+}
+
+function get_color_map() {
+  emitColorMapState();
+}
+
 function set_linewidth_range(min_width, max_width) {
   if (!isValidLineWidthRangeValues(min_width, max_width)) {
     log("set_linewidth_range requires finite values where min > 0, max > 0, and min < max");
@@ -3067,6 +3252,7 @@ function rebuild_from_loaded_pool() {
 
   coordinateOverrides = null;
   poolOverrides = null;
+  colorDriverPermutation = null;
   sortState = createDefaultSortState();
   pointOrder = createPointOrder(randomPool.point_count);
   rebuildSystemFromCurrentState();
@@ -3405,7 +3591,6 @@ function save_view(viewId) {
     hierarchy: cloneJsonSafe(hierarchy),
     hierarchy_ranges: cloneJsonSafe(hierarchyRangeConfig),
     visibility: captureVisibilityState(),
-    colors_by_line_id: captureColorState(),
     line_width_by_line_id: captureLineWidthState(),
     render_settings: captureRenderSettingsState(),
     scene_transform: captureSceneTransformState(),
@@ -3423,6 +3608,11 @@ function save_view(viewId) {
       line_id: selectedLineId
     }
   };
+
+  const savedColorDriverPermutation = captureColorDriverPermutationState();
+  if (Array.isArray(savedColorDriverPermutation)) {
+    payload.color_driver_permutation = savedColorDriverPermutation;
+  }
 
   const serialized = JSON.stringify(payload, null, 2);
   const didWrite = writeTextFileChunked(fullPath, serialized);
@@ -3480,6 +3670,7 @@ function load_view(fullFilePath) {
   poolOverrides = null;
   sortState = sanitizeSortState(parsed.sort_state);
   pointOrder = parsed.point_order.slice();
+  restoreColorDriverPermutationState(parsed.color_driver_permutation, Math.floor(parsed.point_order.length / 2));
   rebuildLinesFromCurrentOrder();
 
   hierarchy = cloneJsonSafe(parsed.hierarchy);
@@ -3572,6 +3763,7 @@ function load_view(fullFilePath) {
   }
 
   eraseColor = DEFAULT_ERASE_COLOR.slice();
+  colorMap = DEFAULT_COLOR_MAP.slice();
   lineWidthRangeMin = DEFAULT_LINE_WIDTH_RANGE_MIN;
   lineWidthRangeMax = DEFAULT_LINE_WIDTH_RANGE_MAX;
   lineWidthMultiplier = DEFAULT_LINE_WIDTH_MULTIPLIER;
@@ -3586,15 +3778,12 @@ function load_view(fullFilePath) {
     applyRenderSettingsState({ erase_color: parsed.erase_color });
   }
 
+  emitColorMapState();
   outlet(0, "linewidth", lineWidthRangeMin, lineWidthRangeMax);
   outlet(0, "linewidth_multiplier", lineWidthMultiplier);
 
   applyHierarchyLineOrder();
   applyVisibilityState(parsed.visibility);
-
-  if (parsed.colors_by_line_id && typeof parsed.colors_by_line_id === "object") {
-    applyColorState(parsed.colors_by_line_id);
-  }
 
   if (parsed.line_width_by_line_id && typeof parsed.line_width_by_line_id === "object") {
     applyLineWidthState(parsed.line_width_by_line_id);
@@ -3602,6 +3791,8 @@ function load_view(fullFilePath) {
 
   if (sortState.applied) {
     applyCurrentSortStateToLines();
+  } else {
+    applyCurrentDerivedColorsToLines();
   }
 
   emitLayerMenu();
@@ -3888,28 +4079,23 @@ function reportSortRows() {
 }
 
 function reshuffleLineColors() {
-  if (!lines || lines.length === 0) {
+  if (!randomPool || !Array.isArray(lineDefinitions) || lineDefinitions.length === 0 || !lines || lines.length === 0) {
     log("reshuffleLineColors requires generated data");
     return;
   }
 
-  const colorPool = [];
-  for (let i = 0; i < lines.length; i += 1) {
-    const color = Array.isArray(lines[i].color) ? lines[i].color.slice() : [1, 1, 1, 1];
-    colorPool.push(color);
-  }
+  const nextPermutation = getEffectiveColorDriverPermutation(lineDefinitions);
 
-  for (let i = colorPool.length - 1; i > 0; i -= 1) {
+  for (let i = nextPermutation.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
-    const temp = colorPool[i];
-    colorPool[i] = colorPool[j];
-    colorPool[j] = temp;
+    const temp = nextPermutation[i];
+    nextPermutation[i] = nextPermutation[j];
+    nextPermutation[j] = temp;
   }
 
-  for (let i = 0; i < lines.length; i += 1) {
-    lines[i].color = colorPool[i];
-  }
+  colorDriverPermutation = isIdentityColorDriverPermutation(nextPermutation) ? null : nextPermutation;
 
+  applyCurrentDerivedColorsToLines();
   emitRenderCommands();
 }
 
@@ -4413,6 +4599,7 @@ function generate(numLines) {
   randomPool = deepFreezeObject(buildRandomPool(count));
   coordinateOverrides = null;
   poolOverrides = null;
+  colorDriverPermutation = null;
   sortState = createDefaultSortState();
 
   if (!verifyPoolIsLocked(randomPool)) {

@@ -138,6 +138,58 @@ function createLineBaseValidators(config) {
     return true;
   }
 
+  function isValidColorMapArray(value) {
+    if (!Array.isArray(value) || value.length !== 8) {
+      return false;
+    }
+
+    for (let i = 0; i < value.length; i += 2) {
+      const minValue = Number(value[i]);
+      const maxValue = Number(value[i + 1]);
+
+      if (!isFinite(minValue) || !isFinite(maxValue)) {
+        return false;
+      }
+
+      if (minValue < 0 || minValue > 1 || maxValue < 0 || maxValue > 1) {
+        return false;
+      }
+
+      if (minValue >= maxValue) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  function isValidColorDriverPermutation(permutation, expectedLength) {
+    if (!Array.isArray(permutation) || permutation.length !== expectedLength) {
+      return false;
+    }
+
+    const seen = {};
+    for (let i = 0; i < permutation.length; i += 1) {
+      const numeric = Number(permutation[i]);
+      if (!isFinite(numeric)) {
+        return false;
+      }
+
+      const index = Math.floor(numeric);
+      if (index !== numeric || index < 0 || index >= expectedLength) {
+        return false;
+      }
+
+      if (seen[index]) {
+        return false;
+      }
+
+      seen[index] = true;
+    }
+
+    return true;
+  }
+
   function isValidLoadedViewPayload(payload) {
     if (!payload || typeof payload !== "object") {
       return false;
@@ -175,24 +227,9 @@ function createLineBaseValidators(config) {
       return false;
     }
 
-    if (typeof payload.colors_by_line_id !== "undefined") {
-      if (!payload.colors_by_line_id || typeof payload.colors_by_line_id !== "object") {
+    if (typeof payload.color_driver_permutation !== "undefined") {
+      if (!isValidColorDriverPermutation(payload.color_driver_permutation, Math.floor(payload.point_order.length / 2))) {
         return false;
-      }
-
-      const colorKeys = Object.keys(payload.colors_by_line_id);
-      for (let i = 0; i < colorKeys.length; i += 1) {
-        const value = payload.colors_by_line_id[colorKeys[i]];
-        if (
-          !Array.isArray(value) ||
-          value.length !== 4 ||
-          !isFinite(Number(value[0])) ||
-          !isFinite(Number(value[1])) ||
-          !isFinite(Number(value[2])) ||
-          !isFinite(Number(value[3]))
-        ) {
-          return false;
-        }
       }
     }
 
@@ -224,6 +261,12 @@ function createLineBaseValidators(config) {
           !isFinite(Number(eraseColor[2])) ||
           !isFinite(Number(eraseColor[3]))
         ) {
+          return false;
+        }
+      }
+
+      if (typeof payload.render_settings.color_map !== "undefined") {
+        if (!isValidColorMapArray(payload.render_settings.color_map)) {
           return false;
         }
       }
